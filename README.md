@@ -28,7 +28,9 @@ cp .env.example .env                 # set GITHUB_TOKEN (harvest), OPENAI_API_KE
       `python -m src.sources.docs_source`,
       `python -m src.sources.issues_source [N]`,
       `python -m src.sources.neurostars_source [N]`)
-- [ ] Stage 2 — hybrid index (chroma + FTS5, incremental ingest)
+- [x] Stage 2 — hybrid index (chroma + FTS5, RRF fusion, incremental ingest;
+      `python -m src.ingest [--full]`). Note: `since=` is inclusive, so each
+      incremental run re-fetches the one boundary issue (idempotent, net-zero).
 - [ ] Stage 3 — version-pinned checkouts + agent tools
 - [ ] Stage 4 — router + one-shot / agentic answer paths
 - [ ] Stage 5 — Streamlit chat UI

@@ -10,7 +10,9 @@ truststore==0.10.4
 tiktoken==0.13.0
 pytest==9.1.1
 
-# Stage 2+ (added when installed): chromadb>=1.0,<2  sentence-transformers
+# Stage 2 — hybrid index (sqlite FTS5 is stdlib)
+chromadb==1.5.9
+sentence-transformers==5.6.0
 # Stage 4+ (added when installed): openai
 # Stage 5  (added when installed): streamlit
 # ripgrep (rg) is a system dependency for Stage 3+: brew install ripgrep
