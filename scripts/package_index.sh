@@ -16,6 +16,20 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 TARBALL="dist/index.tgz"
 
+# Resolve GitHub CLI explicitly: a bare `gh` can be shadowed on PATH by an
+# unrelated tool of the same name. Real GitHub CLI prints a github.com/cli/cli
+# URL in --version. Override with GH=/path/to/gh if needed.
+find_gh() {
+  if [ -n "${GH:-}" ]; then echo "$GH"; return 0; fi
+  for c in gh /opt/homebrew/bin/gh /usr/local/bin/gh "$HOME/miniforge3/bin/gh"; do
+    if command -v "$c" >/dev/null 2>&1 \
+        && "$c" --version 2>/dev/null | grep -qi 'github.com/cli/cli'; then
+      command -v "$c"; return 0
+    fi
+  done
+  return 1
+}
+
 if [ ! -f index/manifest.json ]; then
   echo "error: no index/manifest.json — build the index first: python -m src.ingest" >&2
   exit 1
@@ -36,11 +50,17 @@ if [ "${1:-}" = "--upload" ]; then
   TAG="${2:-index-latest}"
   TITLE="Prebuilt index ($(date -u +%Y-%m-%d))"
   NOTES="Prebuilt bids-assistant index for maintainer testing. Fetch with scripts/fetch_index.sh. This is a build artifact and may be replaced or removed at any time."
-  if ! gh release view "$TAG" >/dev/null 2>&1; then
+  GH="$(find_gh)" || {
+    echo "error: GitHub CLI not found. Install it (brew install gh) or set" >&2
+    echo "       GH=/path/to/gh. A different 'gh' may be shadowing it on PATH." >&2
+    exit 1
+  }
+  echo "using GitHub CLI: $GH"
+  if ! "$GH" release view "$TAG" >/dev/null 2>&1; then
     echo "creating release '$TAG'..."
-    gh release create "$TAG" --title "$TITLE" --notes "$NOTES" --prerelease
+    "$GH" release create "$TAG" --title "$TITLE" --notes "$NOTES" --prerelease
   fi
-  gh release upload "$TAG" "$TARBALL" --clobber
+  "$GH" release upload "$TAG" "$TARBALL" --clobber
   echo "published $TARBALL to release '$TAG'"
 else
   echo
