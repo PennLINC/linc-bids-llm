@@ -9,3 +9,9 @@ __pycache__/
 # The built index stays local until a distribution route is chosen
 # (see "Distributing the index" in BUILD_PLAN.md / README)
 index/
+
+# Version-pinned shallow clones (rebuilt by src/checkouts.py)
+checkouts/
+
+.venv/
+.pytest_cache/

@@ -1,0 +1,40 @@
+# Copy to config.yaml and adjust. config.yaml is gitignored; this file is the
+# committed template. Expanding to another BIDS App = adding an entry under
+# `apps` and re-ingesting — configuration, not code.
+
+contact_email: you@example.edu     # goes in the crawl User-Agent (be reachable)
+
+apps:
+  qsiprep:                         # v0: this is the only entry
+    github_repo: PennLINC/qsiprep
+    docs_paths: [docs/]            # within the repo; rendered RTD not needed
+    neurostars_tags: [qsiprep]
+    neurostars_search: []          # extra search terms if tagging is spotty
+    checkout_tags: 3               # latest N release tags + main
+    neighbors: []                  # v1: qsirecon etc. for pipeline-boundary Qs
+
+retrieval:
+  top_k: 8                         # wider than linc-llm; answers run longer
+  candidates: 40                   # hybrid pool per side before rank fusion
+  embed_model: BAAI/bge-small-en-v1.5   # pinned; MUST match ingest and query
+
+chunk:
+  size_tokens: 500                 # linc-llm production values
+  overlap_tokens: 75
+
+llm:
+  oneshot_model: gpt-5.4-mini      # FAQ-shaped path
+  agent_model: gpt-5.6-terra       # tool loop over tracebacks justifies mid-tier
+  max_output_tokens: 2500
+  max_tool_iterations: 12
+
+index:
+  path: ./index                    # chroma + fts.sqlite + manifest.json (gitignored)
+
+checkouts:
+  path: ./checkouts                # shallow clones per app per tag (gitignored)
+
+feedback:
+  # owner/repo for the "Report this answer" button in the UI (prefilled GitHub
+  # issue). Leave empty to hide the button.
+  github_repo: ""
