@@ -62,7 +62,10 @@ class Store:
             "chunks", metadata={"hnsw:space": "cosine"})
 
         self.fts_path = index_path / "fts.sqlite"
-        self.db = sqlite3.connect(self.fts_path)
+        # check_same_thread=False: Streamlit serves reruns on different threads,
+        # and the query path is read-only, so sharing the connection is safe.
+        # Writes (add/delete) only happen in the single-threaded ingest process.
+        self.db = sqlite3.connect(self.fts_path, check_same_thread=False)
         self._init_fts()
 
     def _init_fts(self) -> None:

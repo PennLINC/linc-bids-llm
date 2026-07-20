@@ -19,4 +19,5 @@ packaging==26.2
 # Stage 4 — answer paths (agent loop uses the Responses API; one-shot uses chat)
 openai==2.46.0
 
-# Stage 5  (added when installed): streamlit
+# Stage 5 — chat UI
+streamlit==1.59.2

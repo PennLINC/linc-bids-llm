@@ -88,3 +88,23 @@ def test_reset_empties_both(store):
     store.reset()
     assert store.count() == 0
     assert store.hybrid_query("anything", k=3) == []
+
+
+def test_query_works_from_another_thread(store):
+    """Streamlit serves reruns on worker threads; the FTS connection must not
+    raise sqlite3.ProgrammingError when queried off the creating thread."""
+    import threading
+
+    out = {}
+
+    def worker():
+        try:
+            out["result"] = store.hybrid_query("CUDA out of memory", k=2)
+        except Exception as e:  # ProgrammingError before the check_same_thread fix
+            out["error"] = e
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+    assert "error" not in out, out.get("error")
+    assert out["result"][0]["id"] == "2"

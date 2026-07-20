@@ -37,5 +37,7 @@ cp .env.example .env                 # set GITHUB_TOKEN (harvest), OPENAI_API_KE
 - [x] Stage 4 — router + one-shot / agentic answer paths
       (`python -m src.ask [--agent|--oneshot] "..."`). Needs OPENAI_API_KEY.
       Agent loop runs on the Responses API (reasoning model + tools).
-- [ ] Stage 5 — Streamlit chat UI
+- [x] Stage 5 — Streamlit chat UI (`streamlit run app.py`): multi-turn chat,
+      Auto/One-shot/Agent modes, routing + tool-call expanders, thumbs+comment
+      feedback to `.feedback/`, per-chat history in `.chats/`.
 - [ ] Stage 6 — eval harness
