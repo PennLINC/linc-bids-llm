@@ -15,3 +15,6 @@ checkouts/
 
 .venv/
 .pytest_cache/
+
+# Build artifacts (index tarball for release upload)
+dist/

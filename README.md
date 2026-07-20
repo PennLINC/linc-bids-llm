@@ -20,6 +20,41 @@ cp config.example.yaml config.yaml   # set contact_email
 cp .env.example .env                 # set GITHUB_TOKEN (harvest), OPENAI_API_KEY
 ```
 
+## For maintainer-testers (prebuilt index, no harvest)
+
+The `index/` (hybrid store) and `checkouts/` (version-pinned source) are build
+artifacts — **gitignored, never committed** (a committed 63 MB index would live
+in git history forever; deleting it later wouldn't reclaim the space without a
+history rewrite). The index is instead shipped as a **GitHub Release asset**
+(~28 MB), which can be replaced or removed anytime without touching history.
+
+**Maintainer — publish the index** (needs `gh auth login`):
+
+```bash
+python -m src.ingest              # build index/ (~16 min; once)
+scripts/package_index.sh --upload # tar it + attach to the 'index-latest' release
+```
+
+Re-running after a re-ingest overwrites the asset in place (`--clobber`).
+
+**Tester — get running without harvesting:**
+
+```bash
+git clone https://github.com/PennLINC/linc-bids-llm && cd linc-bids-llm
+mamba create -n linc-bids-llm python=3.12 && mamba activate linc-bids-llm
+pip install -r requirements.txt
+cp config.example.yaml config.yaml            # set contact_email
+cp .env.example .env                          # set OPENAI_API_KEY (testers need only this)
+scripts/fetch_index.sh                        # download + unpack the prebuilt index/
+python -m src.checkouts                       # clone code for the agent path (~2 min)
+streamlit run app.py
+```
+
+First query downloads the embedding model (BAAI/bge-small-en-v1.5, ~130 MB);
+answers need each tester's own `OPENAI_API_KEY`. The one-shot path works without
+`checkouts/`; the agent path's `grep_code`/`read_file` need it. Please use the
+thumbs+comment feedback in the app — it logs to `.feedback/` (the tuning signal).
+
 ## Status
 
 - [x] Stage 0 — probes + scaffold (`python probes/probe_github_issues.py`,
