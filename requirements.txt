@@ -1,0 +1,23 @@
+# Mirrors the `linc-bids-llm` mamba env (python 3.12) — the only env this
+# project installs into. Pins are updated whenever a package is added there:
+#   mamba create -n linc-bids-llm python=3.12
+#   pip install -r requirements.txt
+
+# Stage 0 — probes + chunking
+requests==2.34.2
+PyYAML==6.0.3
+truststore==0.10.4
+tiktoken==0.13.0
+pytest==9.1.1
+
+# Stage 2 — hybrid index (sqlite FTS5 is stdlib)
+chromadb==1.5.9
+sentence-transformers==5.6.0
+
+# Stage 3 — version-pinned checkouts + tools (ripgrep is a system dep: brew install ripgrep)
+packaging==26.2
+# Stage 4 — answer paths (agent loop uses the Responses API; one-shot uses chat)
+openai==2.46.0
+
+# Stage 5 — chat UI
+streamlit==1.59.2

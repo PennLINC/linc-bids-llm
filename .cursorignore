@@ -1,0 +1,3 @@
+# Keep secrets out of AI context (Cursor). Claude Code equivalent lives in
+# .claude/settings.json permissions.deny.
+.env

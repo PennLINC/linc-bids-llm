@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "bids-assistant",
+      "runtimeExecutable": "/Users/sps253/miniforge3/envs/linc-bids-llm/bin/streamlit",
+      "runtimeArgs": ["run", "app.py", "--server.headless=true", "--server.port=8502", "--browser.gatherUsageStats=false"],
+      "port": 8502
+    }
+  ]
+}
