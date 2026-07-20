@@ -40,4 +40,46 @@ cp .env.example .env                 # set GITHUB_TOKEN (harvest), OPENAI_API_KE
 - [x] Stage 5 — Streamlit chat UI (`streamlit run app.py`): multi-turn chat,
       Auto/One-shot/Agent modes, routing + tool-call expanders, thumbs+comment
       feedback to `.feedback/`, per-chat history in `.chats/`.
-- [ ] Stage 6 — eval harness
+- [x] Stage 6 — eval harness (`python -m eval.harvest_eval` builds the
+      held-out set; `python -m eval.run_eval [--answers N]` scores it).
+
+## Eval
+
+Known-item retrieval over 48 held-out solved cases (24 issues + 24 NeuroStars,
+stratified old/new): query with each case's opening post, check whether its gold
+thread lands in the hybrid top-k. Latest scorecard (k=8):
+
+| method | hit@8 | MRR |
+|--------|-------|-----|
+| hybrid | 100%  | 0.974 |
+| vector-only | 96% | 0.410 |
+| bm25-only | 100% | 0.381 |
+
+The hit rates are high because the gold thread is itself indexed; the load-
+bearing number is **MRR**. Hybrid (0.974) ranks the gold thread ~1st almost
+always, while neither vector (0.41) nor BM25 (0.38) alone does — RRF fusion is
+what buys the ranking. Vector-only also misses 8% of issues (exact error
+strings) that BM25 catches. This is the regression gate for retrieval/prompt/
+model changes.
+
+### Answer eval (`--answers N`) — use with caution
+
+LLM-judged answers against the historical resolution, per path. A first run
+(n=8) scored agent 29% / one-shot 0%, but reading the judge's reasons, most
+"fails" are the assistant giving a *correct, fuller* answer that doesn't match a
+**stale, point-in-time** historical fix (e.g. the reference says "use the
+`pennbbl/qsiprep:unstable` image", long gone; the assistant correctly points to
+later releases and is marked fail). Passes cluster on *timeless* resolutions
+(e.g. "`--combine-all-dwis` is deprecated"). So the current answer-eval is a
+**pessimistic proxy**: the reference set skews to version-specific fixes that no
+longer apply. Before trusting it as a gate, judge for "correct and actionable"
+rather than "matches the historical action", or curate timeless cases. The
+retrieval eval above is the reliable regression gate for now.
+
+### On `changes.md`
+
+The qsiprep changelog is 88 of 146 docs chunks (60%). Measured, it is not noise
+in practice: in full retrieval it appears 0/8 for general questions (issue and
+thread chunks outrank it), and it correctly dominates only version/"what changed"
+questions — which serves the version-awareness goal. Kept. It only crowds
+`search_kb(source_filter="docs")`, a minor agent sub-path.
