@@ -26,6 +26,11 @@ from src.store import Store
 CHATS_DIR = Path(".chats")
 HISTORY_TURNS = 6  # prior messages fed to the agent for follow-up context
 
+# Problem categories for structured feedback (first entry = "no problem").
+CATEGORIES = ["— (looked good)", "wrong fix / advice", "bad or broken sources",
+              "hallucination / made-up detail", "wrong version",
+              "didn't escalate / ask for info", "other"]
+
 
 @st.cache_resource
 def setup():
@@ -94,8 +99,14 @@ def feedback_block(app: str, state: dict, config: dict, manifest: dict) -> None:
 
     with st.expander("Rate this answer / report a problem"):
         rating = st.feedback("thumbs", key=f"rate::{key}")
-        comment = st.text_input("Optional comment", key=f"comm::{key}",
-                                placeholder="What was wrong or missing?")
+        category = st.selectbox(
+            "If it wasn't good, what was wrong?", CATEGORIES, key=f"cat::{key}")
+        correct_url = st.text_input(
+            "Correct source URL, if you know it", key=f"url::{key}",
+            placeholder="https://github.com/... or https://neurostars.org/...",
+            help="Lets this case become a retrieval regression test.")
+        comment = st.text_input(
+            "What was wrong, or what should it have said?", key=f"comm::{key}")
         if st.button("Log feedback", key=f"log::{key}"):
             log_feedback({
                 "app": app,
@@ -103,10 +114,13 @@ def feedback_block(app: str, state: dict, config: dict, manifest: dict) -> None:
                 "question": question,
                 "answer": answer_md,
                 "rating": {0: "down", 1: "up"}.get(rating),
+                "category": None if category == CATEGORIES[0] else category,
+                "correct_url": correct_url.strip() or None,
                 "comment": comment,
                 "index_built": manifest.get("built_at"),
             })
-            st.toast("Logged to .feedback/ — thanks!")
+            st.toast("Logged to .feedback/ — thanks! Submit with "
+                     "scripts/submit_feedback.sh")
         repo = (config.get("feedback") or {}).get("github_repo")
         if repo:
             st.link_button("Report on GitHub",

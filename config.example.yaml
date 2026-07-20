@@ -37,4 +37,4 @@ checkouts:
 feedback:
   # owner/repo for the "Report this answer" button in the UI (prefilled GitHub
   # issue). Leave empty to hide the button.
-  github_repo: ""
+  github_repo: PennLINC/linc-bids-llm

@@ -52,8 +52,15 @@ streamlit run app.py
 
 First query downloads the embedding model (BAAI/bge-small-en-v1.5, ~130 MB);
 answers need each tester's own `OPENAI_API_KEY`. The one-shot path works without
-`checkouts/`; the agent path's `grep_code`/`read_file` need it. Please use the
-thumbs+comment feedback in the app — it logs to `.feedback/` (the tuning signal).
+`checkouts/`; the agent path's `grep_code`/`read_file` need it.
+
+**Battle-testing is methodical — follow [eval/TESTING.md](eval/TESTING.md):**
+work the scenario matrix, rate every answer (thumbs + problem category + the
+correct source URL when you know it), then `scripts/submit_feedback.sh` to PR
+your feedback. The lead aggregates with `python -m eval.feedback_report`,
+promotes failures into regression cases with `python -m eval.feedback_to_cases`,
+and scores them via `python -m eval.run_eval --heldout eval/regression.json` —
+so fixes are measurable and guarded against regression before wider release.
 
 ## Status
 

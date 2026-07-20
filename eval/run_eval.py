@@ -32,11 +32,15 @@ def _reciprocal_rank(gold: str, urls: list[str]) -> float:
 
 
 def retrieval_scores(store, cases: list[dict], k: int) -> dict:
-    """hit@k and MRR for hybrid / vector-only / bm25-only, overall + per source."""
+    """hit@k and MRR for hybrid / vector-only / bm25-only, overall + per source.
+
+    Cases without a gold_url (e.g. answer-only feedback cases) are skipped for
+    retrieval so they don't deflate the hit-rate."""
     methods = ("hybrid", "vector", "bm25")
     agg = {m: {"rr": [], "hit": []} for m in methods}
     per_source: dict = {}
 
+    cases = [c for c in cases if c.get("gold_url")]
     for c in cases:
         where = {"app": c["app"]}
         hy = store.hybrid_query(c["query"], k=k, where=where)
