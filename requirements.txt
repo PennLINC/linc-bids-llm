@@ -13,6 +13,8 @@ pytest==9.1.1
 # Stage 2 — hybrid index (sqlite FTS5 is stdlib)
 chromadb==1.5.9
 sentence-transformers==5.6.0
+
+# Stage 3 — version-pinned checkouts + tools (ripgrep is a system dep: brew install ripgrep)
+packaging==26.2
 # Stage 4+ (added when installed): openai
 # Stage 5  (added when installed): streamlit
-# ripgrep (rg) is a system dependency for Stage 3+: brew install ripgrep
