@@ -1,0 +1,11 @@
+.DS_Store
+.env
+config.yaml
+__pycache__/
+*.pyc
+.chats/
+.feedback/
+
+# The built index stays local until a distribution route is chosen
+# (see "Distributing the index" in BUILD_PLAN.md / README)
+index/
