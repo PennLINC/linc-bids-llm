@@ -20,7 +20,7 @@ from src import answer as answer_mod
 from src import common, router as router_mod
 from src.ask import load_manifest
 from src.checkouts import cloned_tags
-from src.feedback import issue_url, log_feedback
+from src.feedback import issue_url, log_feedback, run_context
 from src.store import Store
 
 CHATS_DIR = Path(".chats")
@@ -118,6 +118,7 @@ def feedback_block(app: str, state: dict, config: dict, manifest: dict) -> None:
                 "correct_url": correct_url.strip() or None,
                 "comment": comment,
                 "index_built": manifest.get("built_at"),
+                **run_context(config, path),   # models/embed/commit provenance
             })
             st.toast("Logged to .feedback/ — thanks! Submit with "
                      "scripts/submit_feedback.sh")

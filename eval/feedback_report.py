@@ -37,6 +37,7 @@ def summarize(entries: list[dict]) -> dict:
     up = sum(1 for e in entries if e.get("rating") == "up")
     down = sum(1 for e in entries if e.get("rating") == "down")
     by_path: dict = {}
+    by_model: dict = {}
     by_category: dict = {}
     for e in entries:
         p = e.get("path", "?")
@@ -44,13 +45,20 @@ def summarize(entries: list[dict]) -> dict:
         slot["total"] += 1
         if e.get("rating") in ("up", "down"):
             slot[e["rating"]] += 1
+        # Model breakdown: what makes an open-vs-closed comparison readable.
+        # Older entries predate provenance capture and land under "(unknown)".
+        m = e.get("model") or "(unknown)"
+        mslot = by_model.setdefault(m, {"up": 0, "down": 0, "total": 0})
+        mslot["total"] += 1
+        if e.get("rating") in ("up", "down"):
+            mslot[e["rating"]] += 1
         cat = e.get("category")
         if cat:
             by_category[cat] = by_category.get(cat, 0) + 1
     failures = [e for e in entries if e.get("rating") == "down"]
     return {
         "total": total, "up": up, "down": down,
-        "by_path": by_path, "by_category": by_category,
+        "by_path": by_path, "by_model": by_model, "by_category": by_category,
         "failures": failures,
     }
 
@@ -82,6 +90,11 @@ def main():
         r = v["up"] + v["down"]
         rate = f"{v['up'] / r:.0%} up" if r else "unrated"
         print(f"    {p:8s} {v['total']:3d} total, {rate}")
+    print("  by model:")
+    for m, v in sorted(s["by_model"].items()):
+        r = v["up"] + v["down"]
+        rate = f"{v['up'] / r:.0%} up" if r else "unrated"
+        print(f"    {m:22s} {v['total']:3d} total, {rate}")
     if s["by_category"]:
         print("  problem categories:")
         for c, n in sorted(s["by_category"].items(), key=lambda x: -x[1]):

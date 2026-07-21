@@ -46,9 +46,32 @@ cp "$SRC" "$DEST"
 git checkout -b "$BRANCH"
 git add "$DEST"
 git commit -q -m "feedback: ${N} entries from ${USER_SLUG}"
-git push -q -u origin "$BRANCH"
-"$GH" pr create --fill \
-  --title "Feedback: ${USER_SLUG} (${N} entries)" \
-  --body "Battle-testing feedback from ${USER_SLUG}. Aggregate with \`python -m eval.feedback_report\`; promote failures with \`python -m eval.feedback_to_cases\`."
+
+TITLE="Feedback: ${USER_SLUG} (${N} entries)"
+BODY="Battle-testing feedback from ${USER_SLUG}. Aggregate with \`python -m eval.feedback_report\`; promote failures with \`python -m eval.feedback_to_cases\`."
+UPSTREAM="$("$GH" repo view --json nameWithOwner --jq .nameWithOwner)"
+PERM="$("$GH" repo view --json viewerPermission --jq .viewerPermission 2>/dev/null || echo READ)"
+
+case "$PERM" in
+  ADMIN|MAINTAIN|WRITE)
+    # Collaborator: push a branch straight to the repo.
+    git push -q -u origin "$BRANCH"
+    "$GH" pr create --base main --title "$TITLE" --body "$BODY"
+    ;;
+  *)
+    # External tester (no write access): standard fork -> PR flow. Works on a
+    # public repo with only a GitHub account — no collaborator invite needed.
+    LOGIN="$("$GH" api user --jq .login)"
+    echo "no write access to $UPSTREAM — using your fork ($LOGIN)"
+    "$GH" repo fork --clone=false --remote=false >/dev/null 2>&1 || true
+    if ! git remote get-url fork >/dev/null 2>&1; then
+      git remote add fork "https://github.com/${LOGIN}/${UPSTREAM##*/}.git"
+    fi
+    git push -q -u fork "$BRANCH"
+    "$GH" pr create --repo "$UPSTREAM" --base main \
+      --head "${LOGIN}:${BRANCH}" --title "$TITLE" --body "$BODY"
+    ;;
+esac
+
 git checkout -q "$START_BRANCH"
 echo "opened PR from $BRANCH ($N entries) and returned to $START_BRANCH"

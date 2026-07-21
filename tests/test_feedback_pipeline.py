@@ -34,6 +34,33 @@ def test_summarize_counts():
     assert len(s["failures"]) == 3
 
 
+def test_summarize_by_model_enables_comparison():
+    entries = [
+        {"rating": "up", "path": "agent", "model": "gpt-5.6-terra"},
+        {"rating": "down", "path": "agent", "model": "gpt-5.6-terra"},
+        {"rating": "up", "path": "agent", "model": "glm-4.7-32b"},
+        {"rating": "up", "path": "agent"},           # pre-provenance entry
+    ]
+    s = summarize(entries)
+    assert s["by_model"]["gpt-5.6-terra"] == {"up": 1, "down": 1, "total": 2}
+    assert s["by_model"]["glm-4.7-32b"]["up"] == 1
+    assert s["by_model"]["(unknown)"]["total"] == 1   # older entries bucketed
+
+
+def test_run_context_records_model_per_path():
+    from src.feedback import run_context
+    cfg = {"llm": {"oneshot_model": "m-small", "agent_model": "m-big",
+                   "api_base": "http://localhost:11434/v1"},
+           "retrieval": {"embed_model": "bge"}}
+    one = run_context(cfg, "oneshot")
+    agent = run_context(cfg, "agent")
+    assert one["model"] == "m-small" and agent["model"] == "m-big"
+    # both models always recorded, so a rating stays interpretable later
+    assert one["oneshot_model"] == "m-small" and one["agent_model"] == "m-big"
+    assert one["embed_model"] == "bge"
+    assert one["api_base"] == "http://localhost:11434/v1"
+
+
 def test_entries_to_cases_filters_and_shapes():
     cases = entries_to_cases(ENTRIES)
     # up-rated skipped; empty-question skipped -> 2 usable failures
