@@ -7,8 +7,9 @@ necessary grep the actual code at the version the user ran — with links back t
 every source.
 
 Full design + staged plan: [BIDS_ASSISTANT_BUILD_PLAN.md](BIDS_ASSISTANT_BUILD_PLAN.md).
-Infrastructure (chunking, permalinks, incremental sync, chat UI) is ported from
-the lab's internal linc-llm project.
+Post-v0 work (open-model A/B, AWS deployment + cost analysis):
+[ROADMAP.md](ROADMAP.md). Infrastructure (chunking, permalinks, incremental
+sync, chat UI) is ported from the lab's internal linc-llm project.
 
 ## Setup
 

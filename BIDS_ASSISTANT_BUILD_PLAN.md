@@ -238,11 +238,12 @@ answers. Then decide: expand apps (config entries + re-ingest) vs. host first.
 
 ## Deferred (not v0)
 
-- **Hosting + embeds** — blocked on PMACS public-VM answer and PennChat API
-  gateway question. The decision gate mirrors linc-llm's index-distribution
-  section: PMACS VM (flat-rate) vs. external VM (~$10/mo) for the app;
-  direct key vs. Bedrock-via-AWS@Penn for tokens; RTD widget passes
-  READTHEDOCS_DATA version into the app. Nothing in v0 may assume an answer.
+- **Hosting + embeds** — **PMACS is ruled out** (2026-07): its VMs are only
+  reachable on the Penn Medicine wifi/VPN, which defeats external testers, an
+  RTD embed, and non-Penn-Med collaborators. AWS is now the working assumption;
+  see [ROADMAP.md](ROADMAP.md) §2 for the architecture, auth, and cost analysis
+  (including hosted-open-model vs. OpenAI economics, and why self-hosting a GPU
+  doesn't pay at lab scale). Nothing in v0 assumes an answer.
 - **The other six apps** — config entries + `neighbors` wiring for
   pipeline-boundary questions (QSIPrep→QSIRecon→XCP-D); no new code expected.
 - **Issue-draft-to-GitHub integration** (v0 prints the draft; filing it and
