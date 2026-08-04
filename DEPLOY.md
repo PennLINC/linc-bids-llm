@@ -7,6 +7,27 @@ the EC2 alternative are in [ROADMAP.md](ROADMAP.md) §2.
 
 Estimated ~$12/mo infra + token usage (guarded by `llm.daily_budget_usd`).
 
+## Before you share the URL (pre-public gate)
+
+Do not hand out the link until all of these are true:
+
+- [ ] **Auth is on** (step 4). Until then the URL is open to anyone, and every
+      question spends tokens. This is the #1 gate.
+- [ ] **`llm.daily_budget_usd` is set intentionally.** It's $300 for the
+      internal test phase — lower it (e.g. $20–50) before a wider audience. It
+      is the only hard spend cap; no provider-side cap exists.
+- [ ] **`llm.pricing` matches the current OpenAI pricing page** (short-context
+      tier). Verified 2026-08: mini $0.75/$4.50, terra $2.00/$12.00. Re-check if
+      you change models or OpenAI changes rates — the ceiling is only as
+      accurate as these numbers. (The estimate is conservative: it ignores
+      prompt caching, so real spend runs a bit under what the sidebar shows.)
+- [ ] **The app actually runs on the box** — `systemctl status bids-assistant`
+      is active and a test question answers. On a CPU-only instance confirm the
+      CPU torch install worked (see step 2's note); a GPU-sized torch wheel can
+      blow the disk or fail to import.
+- [ ] **`.feedback/` is being backed up** (step "What survives a redeploy") or
+      you'll lose the signal the whole test exists to collect.
+
 ## 1. Provision the instance (AWS console)
 
 1. **Lightsail** → Create instance → Linux/Unix → **Ubuntu 22.04 LTS**.

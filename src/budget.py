@@ -8,6 +8,16 @@ and refuse to answer once the day's total crosses llm.daily_budget_usd.
 
 Single-node app: an in-process counter guarded by a lock, written through to a
 small JSON file so it survives restarts. Not built for multi-process serving.
+
+The estimate is deliberately CONSERVATIVE (over-counts, so the ceiling trips
+early rather than late):
+  - It prices all input at the standard rate, ignoring prompt caching. The
+    agent path threads context via previous_response_id, so repeated tokens are
+    cached at ~1/10th the rate — real spend is somewhat lower. Fine while the
+    ceiling is high; if the ceiling is lowered a lot, credit cached tokens
+    (usage.*_details.cached_tokens) at a cached rate to avoid cutting off early.
+  - Rates are the short-context tier. Requests above ~272K input tokens bill on
+    OpenAI's long-context schedule; our questions are far below that.
 """
 import json
 import threading

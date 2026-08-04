@@ -31,9 +31,9 @@ llm:
   # provider-side cap is available (OpenAI key limits unavailable; project caps
   # are soft/email-only). Set high for the internal test phase; lower later.
   daily_budget_usd: 300
-  pricing:                         # $ per 1M tokens; update when rates change
+  pricing:                         # $ per 1M tokens (short-context); update when rates change
     gpt-5.4-mini: {input: 0.75, output: 4.50}
-    gpt-5.6-terra: {input: 2.50, output: 15.00}
+    gpt-5.6-terra: {input: 2.00, output: 12.00}
 
 index:
   path: ./index                    # chroma + fts.sqlite + manifest.json (gitignored)

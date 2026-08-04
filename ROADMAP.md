@@ -195,10 +195,13 @@ is the control that actually maps to cost, because it counts questions/tokens.
 
 ### The open-model economics (the part worth internalizing)
 
-Measured against observed traffic: a one-shot answer costs **~$0.005**; an
-agent answer costs **~$0.15** (5 model turns, 13 tool calls, ~35k cumulative
-input + ~4k output, with reasoning tokens billed as output). At ~30 questions/
-day with 40% routed to the agent, that's **~$57/mo** in tokens.
+Measured against observed traffic, at the actual OpenAI rates (verified 2026-08:
+mini $0.75/$4.50, terra $2.00/$12.00 per 1M in/out, short-context): a one-shot
+answer costs **~$0.005**; an agent answer costs **~$0.12** (5 model turns, 13
+tool calls, ~35k cumulative input + ~4k output, reasoning billed as output) —
+less in practice, since prompt caching on the threaded context isn't credited
+here. At ~30 questions/day with 40% routed to the agent, that's **~$45/mo** in
+tokens.
 
 **Self-hosting an open model on an AWS GPU is not cost-effective at lab scale.**
 A `g6.xlarge` (L4, 24 GB — enough for a 27–32B Q4 model) runs roughly
