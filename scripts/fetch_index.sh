@@ -4,8 +4,9 @@
 #
 #   scripts/fetch_index.sh [tag]        # default tag: index-latest
 #
-# Needs the `gh` CLI authenticated (`gh auth login`). An existing index/ is
-# moved aside to index.bak.<timestamp> rather than clobbered.
+# Uses `gh` when available (needed for a private repo). On a PUBLIC repo it
+# falls back to a plain curl of the release asset — so a server with no `gh`
+# still works. An existing index/ is moved aside to index.bak.<timestamp>.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -23,10 +24,11 @@ find_gh() {
   done
   return 1
 }
-GH="$(find_gh)" || {
-  echo "error: GitHub CLI not found. Install it (brew install gh) or set" >&2
-  echo "       GH=/path/to/gh. A different 'gh' may be shadowing it on PATH." >&2
-  exit 1
+
+# owner/repo from the origin remote, for the public curl fallback.
+repo_slug() {
+  git config --get remote.origin.url \
+    | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##'
 }
 
 if [ -d index ] && [ -f index/manifest.json ]; then
@@ -36,8 +38,18 @@ if [ -d index ] && [ -f index/manifest.json ]; then
 fi
 
 mkdir -p dist
-echo "downloading index.tgz from release '$TAG' (using $GH)..."
-"$GH" release download "$TAG" --pattern index.tgz --dir dist --clobber
+if GH="$(find_gh)"; then
+  echo "downloading index.tgz from release '$TAG' (using $GH)..."
+  "$GH" release download "$TAG" --pattern index.tgz --dir dist --clobber
+else
+  URL="https://github.com/$(repo_slug)/releases/download/${TAG}/index.tgz"
+  echo "no gh CLI; curl-ing public asset: $URL"
+  curl -fL --retry 3 -o dist/index.tgz "$URL" || {
+    echo "error: download failed. If the repo is private, install gh; else" >&2
+    echo "       check the release tag '$TAG' and asset name." >&2
+    exit 1
+  }
+fi
 tar xzf dist/index.tgz    # recreates index/ at the repo root
 echo "unpacked index/:"
 python3 - <<'PY'

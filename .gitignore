@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 .chats/
 .feedback/
+.state/
 
 # The built index stays local until a distribution route is chosen
 # (see "Distributing the index" in BUILD_PLAN.md / README)

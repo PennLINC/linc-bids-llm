@@ -1,0 +1,23 @@
+# systemd unit for the Streamlit app. Install on the server as:
+#   sudo cp deploy/bids-assistant.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now bids-assistant
+# Adjust User and the two paths if you didn't use /home/bids + miniforge.
+[Unit]
+Description=bids-assistant Streamlit app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bids
+WorkingDirectory=/home/bids/linc-bids-llm
+Environment=HOME=/home/bids
+# Bind to localhost only — Caddy terminates TLS and proxies to it publicly.
+ExecStart=/home/bids/miniforge3/envs/linc-bids-llm/bin/streamlit run app.py \
+  --server.address=127.0.0.1 --server.port=8501 \
+  --server.headless=true --browser.gatherUsageStats=false
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

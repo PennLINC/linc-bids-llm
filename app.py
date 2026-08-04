@@ -19,6 +19,7 @@ import streamlit as st
 from src import answer as answer_mod
 from src import common, router as router_mod
 from src.ask import load_manifest
+from src.budget import Budget
 from src.checkouts import cloned_tags
 from src.feedback import issue_url, log_feedback, run_context
 from src.store import Store
@@ -34,10 +35,11 @@ CATEGORIES = ["— (looked good)", "wrong fix / advice", "bad or broken sources"
 
 @st.cache_resource
 def setup():
-    """Config, index check, and store — cached across reruns."""
+    """Config, index check, store, and the shared daily-spend budget — cached
+    across reruns so every session shares one running spend total."""
     config = common.load_config()
     manifest = load_manifest(config)  # raises SystemExit with a clear message
-    return config, manifest, Store(config)
+    return config, manifest, Store(config), Budget(config)
 
 
 # --- local chat cache ---------------------------------------------------------
@@ -131,7 +133,7 @@ def feedback_block(app: str, state: dict, config: dict, manifest: dict) -> None:
 # --- answering ----------------------------------------------------------------
 
 def answer_turn(question: str, app: str, mode: str, config: dict, store,
-                history: list[dict]) -> dict:
+                history: list[dict], meter=None) -> dict:
     """Route (respecting a manual override), answer, and package the assistant
     message dict (content + how it was produced) for storage/rendering."""
     if mode == "One-shot":
@@ -151,12 +153,12 @@ def answer_turn(question: str, app: str, mode: str, config: dict, store,
                               "rephrasing, or switch to Agent mode in the sidebar.")
             return msg
         msg["content"] = answer_mod.answer_oneshot(
-            question, decision.chunks, app, config)
+            question, decision.chunks, app, config, meter=meter)
         msg["sources"] = [{"title": c.get("title", "?"), "url": c.get("url", ""),
                            "source": c.get("source", "")} for c in decision.chunks]
     else:
         result = answer_mod.answer_agent(question, app, config, store,
-                                         history=history)
+                                         history=history, meter=meter)
         msg["content"] = result.answer
         msg["transcript"] = result.transcript
     return msg
@@ -167,7 +169,7 @@ def answer_turn(question: str, app: str, mode: str, config: dict, store,
 st.set_page_config(page_title="bids-assistant", page_icon="🧠")
 
 try:
-    config, manifest, store = setup()
+    config, manifest, store, budget = setup()
 except SystemExit as e:
     st.error(str(e))
     st.stop()
@@ -192,6 +194,9 @@ with st.sidebar:
         + f"\n\n**Models:** one-shot `{config['llm']['oneshot_model']}`, "
         f"agent `{config['llm']['agent_model']}`"
     )
+    if budget.limit is not None:
+        st.caption(f"Spend today (UTC): ${budget.spent_today():.2f} / "
+                   f"${budget.limit:.0f}")
 
 state = st.session_state.setdefault("chats", {}).setdefault(
     app, {"id": None, "created": None, "messages": []})
@@ -220,10 +225,16 @@ if question := st.chat_input(f"Paste an error or ask about {app}…"):
     with st.chat_message("user"):
         st.markdown(question)
     with st.chat_message("assistant"):
+        if budget.over():
+            st.error(f"The daily budget of ${budget.limit:.0f} (UTC) has been "
+                     "reached — please try again tomorrow. Ping a maintainer if "
+                     "you need it raised.")
+            st.stop()
         history = agent_history(state["messages"][:-1])
         with st.spinner("Retrieving + answering…"):
             try:
-                msg = answer_turn(question, app, mode, config, store, history)
+                msg = answer_turn(question, app, mode, config, store, history,
+                                  meter=budget)
             except SystemExit as e:  # e.g. missing OPENAI_API_KEY
                 st.error(str(e))
                 st.stop()

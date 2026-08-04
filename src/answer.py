@@ -75,12 +75,16 @@ def _client():
     return OpenAI()
 
 
-def _chat(client, model: str, messages: list, config: dict, tools=None):
+def _chat(client, model: str, messages: list, config: dict, tools=None,
+          meter=None):
     kwargs = dict(model=model, messages=messages,
                   max_completion_tokens=config["llm"]["max_output_tokens"])
     if tools:
         kwargs["tools"] = tools
-    return client.chat.completions.create(**kwargs).choices[0].message
+    resp = client.chat.completions.create(**kwargs)
+    if meter is not None:
+        meter.record(model, getattr(resp, "usage", None))
+    return resp.choices[0].message
 
 
 # --- one-shot path ---------------------------------------------------------
@@ -95,13 +99,13 @@ def _oneshot_user_prompt(question: str, chunks: list[dict]) -> str:
 
 
 def answer_oneshot(question: str, chunks: list[dict], app: str,
-                   config: dict, client=None) -> str:
+                   config: dict, client=None, meter=None) -> str:
     client = client or _client()
     system = SYSTEM_ONESHOT.format(app=app, today=date.today().isoformat())
     msg = _chat(client, config["llm"]["oneshot_model"], [
         {"role": "system", "content": system},
         {"role": "user", "content": _oneshot_user_prompt(question, chunks)},
-    ], config)
+    ], config, meter=meter)
     return msg.content or ""
 
 
@@ -137,7 +141,7 @@ def _function_calls(resp) -> list:
 
 
 def answer_agent(question: str, app: str, config: dict, store,
-                 history: list | None = None, client=None) -> AgentResult:
+                 history: list | None = None, client=None, meter=None) -> AgentResult:
     """Run the tool loop on the Responses API: the model calls search_kb /
     grep_code / read_file until it answers or hits the iteration cap (then it's
     asked to wrap up with no tools).
@@ -163,6 +167,8 @@ def answer_agent(question: str, app: str, config: dict, store,
     resp = client.responses.create(model=model, instructions=instructions,
                                    input=input_items, tools=tools,
                                    max_output_tokens=max_out)
+    if meter is not None:
+        meter.record(model, getattr(resp, "usage", None))
     turns = 1
     while True:
         calls = _function_calls(resp)
@@ -185,6 +191,8 @@ def answer_agent(question: str, app: str, config: dict, store,
         resp = client.responses.create(
             model=model, previous_response_id=resp.id, input=outputs,
             tools=tools, max_output_tokens=max_out)
+        if meter is not None:
+            meter.record(model, getattr(resp, "usage", None))
         turns += 1
 
     # Hit the cap — feed the last tool outputs plus a wrap-up nudge, no tools.
@@ -195,4 +203,6 @@ def answer_agent(question: str, app: str, config: dict, store,
                           "what you have, or produce the GitHub issue draft if "
                           "unresolved."}],
         max_output_tokens=max_out)
+    if meter is not None:
+        meter.record(model, getattr(resp, "usage", None))
     return AgentResult(resp.output_text or "", transcript, turns)
