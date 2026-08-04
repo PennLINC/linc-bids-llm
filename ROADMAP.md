@@ -112,17 +112,74 @@ Single small instance, mirroring the local setup:
 Skip ECS/Fargate/EKS unless there's a reason; at this scale they add moving
 parts without benefit.
 
+### Provisioning + deploy workflow
+
+**Lightsail over EC2 for the v0 hosted preview.** Both are available on the
+account. Lightsail wins here: fixed bundled price (compute + storage + transfer
+in one predictable monthly number the lab can budget), a simpler console with
+less to misconfigure, and a static IP + firewall + snapshots built in. A ~$12/mo
+plan (2 GB RAM, 2 vCPU, 60 GB SSD) fits the footprint. Move to **EC2** only when
+we need something Lightsail lacks — WAF/ALB, IAM instance roles for SSM,
+autoscaling, or tight VPC integration — none of which v0 needs.
+
+**GitHub stays the source of truth; the server is just a checkout that pulls.**
+Development workflow is unchanged (branch → PR → merge to main). Deployment is
+"the box pulls main and restarts." One-time setup on the instance:
+
+1. `git clone` the repo; install miniforge; create the `linc-bids-llm` env;
+   `pip install -r requirements.txt`.
+2. `.env` with `OPENAI_API_KEY` (chmod 600), `config.yaml` from the example.
+3. `scripts/fetch_index.sh` — on a **public** repo the release asset is
+   curl-downloadable, so no `gh` auth needed on the server (simplify the script
+   to a plain `curl -L` of the asset URL for the server case).
+4. `python -m src.checkouts` (~2 min).
+5. Run Streamlit as a **systemd service** (not a bare `streamlit run` in a
+   shell — it must survive logout/reboot), bound to localhost:8501.
+6. **Caddy** in front as reverse proxy → automatic Let's Encrypt HTTPS on the
+   domain; or a Lightsail load balancer for managed certs.
+7. Auth per the section below (Cloudflare Access is the low-friction pick).
+
+**Updating:** `git pull && sudo systemctl restart bids-assistant`. Wrap it in a
+`scripts/deploy.sh`, or trigger from a GitHub Action over SSH later. Re-run
+`fetch_index.sh` after a fresh ingest; restart to pick up the swapped index.
+
 ### Auth and cost control (required before public exposure)
 
 Every question costs money, so an unauthenticated public endpoint is a cost
-risk, not just a security one. Options, cheapest first:
+risk, not just a security one.
 
-- **Cloudflare Access** in front (free tier covers ~50 users) — no app changes.
-- **Streamlit native OIDC** (`st.login`) against Penn SSO or Google, if an OIDC
-  endpoint is available.
-- ALB + Cognito, if you want it fully inside AWS.
+**No provider-side hard cap is available (confirmed 2026-07 with UPenn admins):**
+OpenAI key-level limits can't be set on our account, and project-level spend
+caps are now *soft* — they email an alert at the threshold but do **not** stop
+spending. So the only hard backstop is the one we build into the app.
 
-Pair with per-user rate limiting and a hard monthly spend cap on the API key.
+**1. Authentication — the first-order control.** Turn "anyone on the internet
+can spend our tokens" into "a known person misbehaves." Cheapest first:
+- **Cloudflare Access** in front (free tier ~50 users) — no app changes, and it
+  does edge rate-limiting too. Works over Lightsail or EC2.
+- **Streamlit native OIDC** (`st.login`) against Penn SSO or Google.
+- ALB + Cognito, if fully inside AWS is preferred.
+
+**2. An in-app daily spend ceiling — the required hard backstop.** Since no
+provider cap will stop a runaway bill (a user looping, a bug, an agent question
+that fans out), the app must stop itself:
+- Each OpenAI/Responses call returns token `usage`; convert to a dollar estimate
+  with the configured model's rates and accumulate it in a small persisted
+  counter keyed by UTC date (SQLite row or a JSON file — the app is single-node).
+- Before answering, check the running daily total against a configured
+  `llm.daily_budget_usd`; once exceeded, refuse with "daily budget reached" and
+  log it. ~30 lines in `answer.py` + a config key. Covers self-inflicted
+  runaway cost that no network-layer rule would see.
+- Optional: a per-user/session rate limit (N questions/hour) on top.
+
+**Why not throttle by IP at the AWS layer.** AWS WAF rate-based rules exist but
+are a poor fit here: (a) WAF attaches to CloudFront/ALB/API Gateway, not bare
+EC2 or Lightsail, so it means adding a load balancer; (b) Streamlit is
+websocket-based — questions ride one long-lived connection, so HTTP-request
+rate limiting barely correlates with token spend; (c) IP is leaky — a campus NAT
+is one IP (throttles real users together) while an abuser rotates IPs. Fine
+against volumetric scraping; useless as a token-cost cap. The app-level ceiling
+is the control that actually maps to cost, because it counts questions/tokens.
 
 ### Cost estimate (approximate — verify current AWS rates)
 
