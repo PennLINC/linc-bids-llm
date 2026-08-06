@@ -21,6 +21,16 @@ cp config.example.yaml config.yaml   # set contact_email
 cp .env.example .env                 # set GITHUB_TOKEN (harvest), OPENAI_API_KEY
 ```
 
+## Hosted preview
+
+There's a live hosted instance (AWS Lightsail, behind a shared-password gate).
+**Colleagues testing it need nothing local** — just the URL + password from a
+maintainer, then follow [eval/TESTING.md](eval/TESTING.md). Their feedback lands
+centrally on the server. Deployment/ops: [DEPLOY.md](DEPLOY.md).
+
+The sections below are for running your **own** copy locally (or standing up
+another host).
+
 ## For maintainer-testers (prebuilt index, no harvest)
 
 The `index/` (hybrid store) and `checkouts/` (version-pinned source) are build

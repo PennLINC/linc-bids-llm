@@ -1,16 +1,20 @@
-# Caddy reverse proxy: automatic HTTPS (Let's Encrypt) in front of Streamlit.
-# Replace the domain, then:
-#   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+# Caddy reverse proxy: automatic HTTPS (Let's Encrypt) + a shared-password gate
+# in front of Streamlit. Caddy proxies websockets automatically (Streamlit needs
+# that). Install:
+#   sudo nano /etc/caddy/Caddyfile     # replace the whole default file with this
 #   sudo systemctl reload caddy
-# Caddy proxies websockets automatically, which Streamlit requires.
 #
-# Auth: prefer Cloudflare Access in front (no app change). For a quick private
-# gate instead, uncomment basic_auth and set a bcrypt hash (`caddy hash-password`).
+# Hostname: use your static IP with dashes as an sslip.io host (no domain needed)
+# e.g. IP 3.222.115.183 -> 3-222-115-183.sslip.io. sslip.io resolves it to that
+# IP and Caddy still issues a real cert.
+#
+# Password: run `caddy hash-password`, paste the $2a$... hash below. Everyone you
+# share with uses the same `tester` + password (no accounts). Edit this in nano,
+# not a shell heredoc — the $ in the bcrypt hash gets mangled by the shell.
 
-bids-assistant.example.edu {
+<DASHED-IP>.sslip.io {
+    basic_auth {
+        tester <PASTE_BCRYPT_HASH>
+    }
     reverse_proxy 127.0.0.1:8501
-
-    # basic_auth {
-    #     tester JDJhJDE0J...bcrypt-hash...
-    # }
 }

@@ -39,15 +39,22 @@ wasn't good, and — most valuable — the **correct source URL** when you know 
 
 ## Submit
 
-```bash
-scripts/submit_feedback.sh      # opens a PR adding eval/feedback/<you>.jsonl
-```
+- **Testing on the hosted app?** Nothing to do — everyone shares one instance,
+  so your ratings already land in `.feedback/feedback.jsonl` **on the server**.
+  The lead pulls that file and runs the report (below).
+- **Running your own local copy?** Push your feedback as a PR:
+  ```bash
+  scripts/submit_feedback.sh      # opens a PR adding eval/feedback/<you>.jsonl
+  ```
 
 ## Triage + improve (lead)
 
+Gather the feedback first — grab the server's log (`scp` it into `.feedback/`,
+or run on the box), plus any PR'd `eval/feedback/*.jsonl` — then:
+
 ```bash
-python -m eval.feedback_report          # up/down by path, categories, failures
-python -m eval.feedback_to_cases        # failures -> eval/regression.json
+python -m eval.feedback_report --local  # up/down by path, by model, categories, failures
+python -m eval.feedback_to_cases --local # failures -> eval/regression.json
 python -m eval.run_eval --heldout eval/regression.json   # score them
 ```
 

@@ -74,16 +74,30 @@ centrally via `run_eval`; keep battle-testers on one consistent configuration.
 
 ## 2. Deployment to AWS
 
-**PMACS is ruled out:** its VMs are reachable only on the Penn Medicine
+**Status: DEPLOYED** on AWS **Lightsail** (us-east-1, Ubuntu 24.04, $12/2 GB
+plan) as of 2026-08-06 — Streamlit behind Caddy over HTTPS via an `sslip.io`
+hostname, gated by a shared Caddy `basic_auth` password, with the in-app daily
+spend ceiling live. Step-by-step runbook: [DEPLOY.md](DEPLOY.md). The notes
+below are the design rationale; a few now describe what was chosen.
+
+**PMACS was ruled out:** its VMs are reachable only on the Penn Medicine
 wifi/VPN, which defeats external testers, a Read-the-Docs embed, and any
-non-Penn-Med collaborator. AWS is the working assumption.
+non-Penn-Med collaborator.
+
+**Getting there was gated on account access, not tech:** the default Penn
+`PennResearcher` role couldn't provision compute (Lightsail blocked, EC2
+pervasively denied, no default VPC). A coworker's broader role could —
+`aws ec2 create-default-vpc` restored networking and the Lightsail path worked.
+The Penn VPN also refuses outbound port 22, so terminal SSH/tunnels fail; the
+Lightsail browser SSH (over 443) is the way in.
 
 ### What the app actually needs
 
 - A **long-lived process** — Streamlit is websocket-based, so this is not a
   Lambda/serverless fit.
 - **~10–20 GB disk**: index (63 MB) + checkouts (279 MB) + model cache and the
-  Python env (torch dominates — use a CPU-only torch wheel to slim it).
+  Python env (torch dominates ~2 GB — on x86 the default pip wheel is already
+  CPU-only, no special index needed).
 - **CPU only.** Query-time embedding of a single question with bge-small is
   trivial; there is no GPU need unless self-hosting a model (see economics).
 - **~4 GB RAM** is comfortable.
@@ -101,13 +115,33 @@ Single small instance, mirroring the local setup:
   (free), or ALB + ACM if you want AWS-managed certs.
 - **Secrets**: SSM Parameter Store `SecureString` (free at standard tier) —
   cheaper than Secrets Manager for one key.
-- **Ingest**: a systemd timer / cron running `python -m src.ingest` weekly.
-  **Operational gotcha:** the app reads the index while ingest writes it. Build
-  into a staging directory and swap atomically, then restart the service —
-  don't ingest in place under a live app.
 - **Persistence**: `index/` and `checkouts/` are both rebuildable, so they need
-  no backup. `.feedback/` and `.chats/` **do** — sync them to S3 (or move
+  no backup. `.feedback/`, `.chats/`, `.state/` **do** — sync them to S3 (or move
   feedback to a small database) or they die with the instance.
+
+### Index refresh (decided; not yet built)
+
+Today: manual + asset-based — rebuild elsewhere, `package_index.sh --upload`,
+then `REFRESH_INDEX=1 scripts/deploy.sh` on the server (`fetch_index.sh` swaps
+atomically). Two ways to automate:
+
+- **Model A — server self-refreshes (recommended for one box).** A weekly
+  `systemd` timer runs `src.checkouts` (updates main + new release tags) and an
+  **incremental** `src.ingest`, builds to a **staging dir**, swaps atomically,
+  and restarts the service. Incremental is cheap (only threads changed since
+  last run), so it's fast/low-memory even on 2 GB. Requires a **`GITHUB_TOKEN`**
+  in the server `.env` for harvesting. **Never ingest in place** — the live app
+  holds the Chroma/SQLite open and a concurrent write can corrupt it.
+- **Model B — build elsewhere, server pulls.** A scheduled job (maintainer
+  machine or GitHub Actions) rebuilds + republishes the asset; a server timer
+  pulls it. Keeps the server token-free and light; the asset is the source of
+  truth. More moving parts.
+
+**Is the GitHub release asset still needed?** Under Model A, not for serving —
+it becomes an optional golden-copy backup (and for local users / a second host);
+the refresh script can re-publish it so it stays current. Under Model B it's the
+mechanism. Recommend **Model A** for the single lab box, keeping the asset as a
+periodic backup.
 
 Skip ECS/Fargate/EKS unless there's a reason; at this scale they add moving
 parts without benefit.
