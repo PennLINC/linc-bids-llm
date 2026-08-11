@@ -35,6 +35,7 @@ SYSTEM_ONESHOT = (
     "- If the context does not actually answer the question, say so and ask "
     "for the version, exact command, and full traceback.\n"
     "- Be concise and practical; give the steps, not a preamble.\n"
+    "{notes}"
     "Today's date: {today}."
 )
 
@@ -62,8 +63,25 @@ SYSTEM_AGENT = (
     "title line and sections for Version, Command, Traceback/symptom, What was "
     "tried, and Suspected code path (with a permalink if you have one). Remind "
     "the user to search open issues for a duplicate before filing.\n"
+    "{notes}"
     "Today's date: {today}."
 )
+
+
+def _notes_block(config: dict, app: str) -> str:
+    """Domain-boundary facts for the app + its neighbors, injected into the
+    system prompt. This is how the assistant is told things the corpus/model
+    gets wrong — e.g. that reconstruction is qsirecon's job, not qsiprep's."""
+    from .router import scope
+
+    lines = []
+    for a in scope(config, app):
+        for note in (config["apps"].get(a) or {}).get("notes", []) or []:
+            lines.append(f"- ({a}) {' '.join(note.split())}")
+    if not lines:
+        return ""
+    return ("Important package facts (authoritative — trust these over any "
+            "older/ambiguous retrieved text):\n" + "\n".join(lines) + "\n")
 
 
 def _client():
@@ -101,7 +119,8 @@ def _oneshot_user_prompt(question: str, chunks: list[dict]) -> str:
 def answer_oneshot(question: str, chunks: list[dict], app: str,
                    config: dict, client=None, meter=None) -> str:
     client = client or _client()
-    system = SYSTEM_ONESHOT.format(app=app, today=date.today().isoformat())
+    system = SYSTEM_ONESHOT.format(app=app, today=date.today().isoformat(),
+                                  notes=_notes_block(config, app))
     msg = _chat(client, config["llm"]["oneshot_model"], [
         {"role": "system", "content": system},
         {"role": "user", "content": _oneshot_user_prompt(question, chunks)},
@@ -153,7 +172,8 @@ def answer_agent(question: str, app: str, config: dict, store,
     """
     client = client or _client()
     toolbox = Toolbox(config, store, app)
-    instructions = SYSTEM_AGENT.format(app=app, today=date.today().isoformat())
+    instructions = SYSTEM_AGENT.format(app=app, today=date.today().isoformat(),
+                                       notes=_notes_block(config, app))
     tools = _responses_tools()
     max_out = config["llm"]["max_output_tokens"]
     model = config["llm"]["agent_model"]

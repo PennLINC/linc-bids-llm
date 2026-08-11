@@ -49,13 +49,15 @@ def toolbox(config):
 
 def test_search_kb_formats_and_scopes(toolbox):
     out = toolbox.search_kb("out of memory")
-    assert toolbox.store.where == {"app": "qsiprep"}
+    # scopes to the app plus its pipeline neighbors (qsiprep -> qsirecon)
+    assert toolbox.store.where == {"app": ["qsiprep", "qsirecon"]}
     assert "[1] CUDA out of memory — issues (solved)" in out
     assert "https://github.com/PennLINC/qsiprep/issues/42" in out
     assert "[2] Usage — docs" in out
 
     toolbox.search_kb("x", source_filter="neurostars")
-    assert toolbox.store.where == {"app": "qsiprep", "source": "neurostars"}
+    assert toolbox.store.where == {"app": ["qsiprep", "qsirecon"],
+                                   "source": "neurostars"}
 
 
 def test_grep_code_literal_match(toolbox):

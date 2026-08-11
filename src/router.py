@@ -38,6 +38,14 @@ class Decision:
     reason: str
 
 
+def scope(config: dict, app: str) -> list[str]:
+    """Apps whose content is in retrieval scope for a question about `app`:
+    the app itself plus its configured pipeline neighbors (e.g. qsiprep pulls
+    qsirecon for boundary questions). Used as a `where={"app": [...]}` filter."""
+    neighbors = ((config.get("apps") or {}).get(app) or {}).get("neighbors", []) or []
+    return [app, *neighbors]
+
+
 def route(question: str, store, config: dict, app: str) -> Decision:
     """Pick a path. Pasted tracebacks and long dumps always go agentic; short
     questions go one-shot only on a high-confidence FAQ match."""
@@ -45,7 +53,8 @@ def route(question: str, store, config: dict, app: str) -> Decision:
         return Decision("agent", [], "contains a traceback / long paste")
 
     chunks = store.hybrid_query(
-        question, k=config["retrieval"]["top_k"], where={"app": app})
+        question, k=config["retrieval"]["top_k"],
+        where={"app": scope(config, app)})
     if chunks:
         top = chunks[0]
         both_agree = top.get("in_vector") and top.get("in_bm25")

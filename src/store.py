@@ -38,13 +38,18 @@ def _fts_match_query(text: str) -> str | None:
     return " OR ".join(f'"{t}"' for t in tokens)
 
 
+def _clause(k, v) -> dict:
+    """One Chroma filter clause; a list value means membership ($in)."""
+    return {k: {"$in": list(v)}} if isinstance(v, (list, tuple)) else {k: v}
+
+
 def _chroma_where(where: dict | None) -> dict | None:
-    """Chroma needs multi-key filters wrapped in $and; single key passes through."""
+    """Chroma filter. List values become $in (e.g. app in {app, *neighbors});
+    multiple keys are wrapped in $and."""
     if not where:
         return None
-    if len(where) == 1:
-        return dict(where)
-    return {"$and": [{k: v} for k, v in where.items()]}
+    clauses = [_clause(k, v) for k, v in where.items()]
+    return clauses[0] if len(clauses) == 1 else {"$and": clauses}
 
 
 class Store:
@@ -151,8 +156,12 @@ class Store:
         sql = "SELECT id FROM fts WHERE fts MATCH ?"
         params: list = [match]
         for col, val in scope.items():
-            sql += f" AND {col} = ?"
-            params.append(val)
+            if isinstance(val, (list, tuple)):
+                sql += f" AND {col} IN ({','.join('?' * len(val))})"
+                params.extend(val)
+            else:
+                sql += f" AND {col} = ?"
+                params.append(val)
         sql += " ORDER BY rank LIMIT ?"
         params.append(k)
         return [row[0] for row in self.db.execute(sql, params).fetchall()]

@@ -79,7 +79,7 @@ def main():
 
     if force == "oneshot":
         chunks = store.hybrid_query(question, k=config["retrieval"]["top_k"],
-                                    where={"app": app})
+                                    where={"app": router_mod.scope(config, app)})
         decision = router_mod.Decision("oneshot", chunks, "forced --oneshot")
     elif force == "agent":
         decision = router_mod.Decision("agent", [], "forced --agent")

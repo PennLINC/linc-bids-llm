@@ -5,13 +5,37 @@
 contact_email: you@example.edu     # goes in the crawl User-Agent (be reachable)
 
 apps:
-  qsiprep:                         # v0: this is the only entry
+  qsiprep:
     github_repo: PennLINC/qsiprep
     docs_paths: [docs/]            # within the repo; rendered RTD not needed
     neurostars_tags: [qsiprep]
     neurostars_search: []          # extra search terms if tagging is spotty
     checkout_tags: 3               # latest N release tags + main
-    neighbors: []                  # v1: qsirecon etc. for pipeline-boundary Qs
+    neighbors: [qsirecon]          # pipeline neighbors, retrieved alongside
+    # `notes` correct known confusions the corpus/model gets wrong; they're
+    # injected into the system prompt whenever this app is in scope.
+    notes:
+      - "qsiprep does DWI PREPROCESSING only. Reconstruction (tractography,
+        scalar/ODF maps, connectivity) moved to the separate qsirecon package;
+        current qsiprep does NOT do reconstruction and has no --recon-spec /
+        --recon_input. A recon_spec.yaml is passed to qsirecon, not qsiprep.
+        Send reconstruction/post-processing questions to qsirecon."
+
+  qsirecon:
+    github_repo: PennLINC/qsirecon
+    docs_paths: [docs/]
+    neurostars_tags: [qsirecon]
+    neurostars_search: []
+    checkout_tags: 3
+    neighbors: [qsiprep]           # takes qsiprep's preprocessed outputs as input
+    notes:
+      - "qsirecon does RECONSTRUCTION / post-processing of qsiprep outputs
+        (tractography, scalar maps, connectivity). It is the successor to
+        qsiprep's old built-in --recon functionality; recon_spec.yaml and
+        --recon-spec belong here, not in qsiprep."
+
+  # Add more the same way (config, not code) — e.g. aslprep, xcp-d, cubids,
+  # freesurfer-post, modelarray. Probe each first (probes/) for tag health.
 
 retrieval:
   top_k: 8                         # wider than linc-llm; answers run longer

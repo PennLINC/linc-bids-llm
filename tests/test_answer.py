@@ -96,6 +96,21 @@ def test_version_hint():
     assert "did not state a version" in answer._version_hint("why does eddy fail?")
 
 
+def test_notes_injected_into_system_prompt(config):
+    # config fixture gives qsiprep a note about reconstruction being qsirecon's
+    client = FakeClient([FakeMsg(content="ok")])
+    answer.answer_oneshot("can qsiprep do reconstruction?", CHUNKS, "qsiprep",
+                          config, client=client)
+    system = client.chat.completions.calls[0]["messages"][0]["content"]
+    assert "reconstruction is qsirecon's job" in system
+    assert "(qsiprep)" in system            # note is attributed to its app
+
+
+def test_notes_block_empty_when_no_notes():
+    cfg = {"apps": {"cubids": {"neighbors": []}}}
+    assert answer._notes_block(cfg, "cubids") == ""
+
+
 # --- agent loop --------------------------------------------------------------
 
 def test_answer_agent_runs_tool_then_answers(config):

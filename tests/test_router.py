@@ -19,8 +19,10 @@ def test_is_long_paste():
 class FakeStore:
     def __init__(self, results):
         self.results = results
+        self.where = None
 
     def hybrid_query(self, query, k, where=None):
+        self.where = where
         return self.results
 
 
@@ -60,3 +62,20 @@ def test_route_weak_match_goes_agent():
 def test_route_no_results_goes_agent():
     d = router.route("something never seen", FakeStore([]), _cfg(), "qsiprep")
     assert d.path == "agent"
+
+
+def test_scope_includes_neighbors():
+    cfg = {"apps": {"qsiprep": {"neighbors": ["qsirecon"]},
+                    "qsirecon": {"neighbors": ["qsiprep"]},
+                    "aslprep": {"neighbors": []}}}
+    assert router.scope(cfg, "qsiprep") == ["qsiprep", "qsirecon"]
+    assert router.scope(cfg, "aslprep") == ["aslprep"]          # no neighbors
+    assert router.scope(cfg, "cubids") == ["cubids"]            # app not in config
+
+
+def test_route_scopes_query_to_neighbors():
+    store = FakeStore([{"in_vector": True, "in_bm25": True, "source": "docs"}])
+    cfg = {"retrieval": {"top_k": 8},
+           "apps": {"qsiprep": {"neighbors": ["qsirecon"]}}}
+    router.route("what is --output-resolution?", store, cfg, "qsiprep")
+    assert store.where == {"app": ["qsiprep", "qsirecon"]}

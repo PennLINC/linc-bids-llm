@@ -138,7 +138,7 @@ def answer_turn(question: str, app: str, mode: str, config: dict, store,
     message dict (content + how it was produced) for storage/rendering."""
     if mode == "One-shot":
         chunks = store.hybrid_query(question, k=config["retrieval"]["top_k"],
-                                    where={"app": app})
+                                    where={"app": router_mod.scope(config, app)})
         decision = router_mod.Decision("oneshot", chunks, "forced (sidebar)")
     elif mode == "Agent":
         decision = router_mod.Decision("agent", [], "forced (sidebar)")

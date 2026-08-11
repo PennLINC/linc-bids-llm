@@ -270,9 +270,16 @@ quality with the eval) moves the bill more than swapping models does.
 
 ## 3. Other deferred items
 
-- **The other six apps** (CuBIDS, BABS, ASLPrep, QSIRecon, XCP-D, BDT) — config
-  entries plus `neighbors` wiring for pipeline-boundary questions. No new code
-  expected; this is the "configuration, not code" claim being cashed in.
+- **More apps.** qsirecon is added (config + `neighbors` wiring, both directions
+  with qsiprep). Building it also added the cross-app machinery once:
+  list-valued `where` scoping (`app ∈ {app, *neighbors}`) and a per-app `notes`
+  field injected into the system prompt to correct known confusions (e.g.
+  reconstruction is qsirecon's, not qsiprep's). With that in place, further apps
+  (aslprep, xcp-d, cubids, freesurfer-post, modelarray) are **config-only** —
+  add an `apps` entry, `notes` if needed, re-ingest. Probe each first for tag
+  health. FreeSurfer proper is out of scope (not lab-maintained); a lab wrapper
+  like freesurfer-post fits. Remaining operational step for qsirecon: re-ingest
+  + `src.checkouts` + republish the index asset + refresh the server.
 - **Issue-draft-to-GitHub** — v0 prints the draft; filing it and duplicate-
   checking open issues needs auth, so it rides with hosting.
 - **Answer-eval methodology** — the current LLM judge scores against stale

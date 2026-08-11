@@ -30,7 +30,8 @@ class Toolbox:
     # --- search_kb ---------------------------------------------------------
 
     def search_kb(self, query: str, source_filter: str | None = None) -> str:
-        where = {"app": self.app}
+        from .router import scope
+        where = {"app": scope(self.config, self.app)}   # app + pipeline neighbors
         if source_filter:
             where["source"] = source_filter
         results = self.store.hybrid_query(

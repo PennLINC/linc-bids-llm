@@ -76,6 +76,22 @@ def test_hybrid_query_where_scopes_both_halves(store):
     assert [r["id"] for r in results] == ["3"]
 
 
+def test_where_app_list_matches_membership(store, monkeypatch):
+    """A list value scopes to app membership (app + neighbors), on both the
+    vector ($in) and BM25 (IN) halves."""
+    # add a neighbor-app chunk so the set filter has something to include/exclude
+    store.add([{"id": "9", "text": "qsirecon reconstruction recon_spec details",
+                "app": "qsirecon", "source": "docs", "title": "recon", "url": "u9"}])
+    # scoped to qsiprep only: the qsirecon chunk is excluded
+    out = store.hybrid_query("reconstruction recon_spec", k=5,
+                             where={"app": "qsiprep"})
+    assert all(r["id"] != "9" for r in out)
+    # scoped to the set {qsiprep, qsirecon}: the neighbor chunk is now reachable
+    out = store.hybrid_query("reconstruction recon_spec", k=5,
+                             where={"app": ["qsiprep", "qsirecon"]})
+    assert any(r["id"] == "9" for r in out)
+
+
 def test_delete_removes_from_both_indexes(store):
     store.delete({"source": "issues", "gh_issue": 42})
     assert store.count() == 2
