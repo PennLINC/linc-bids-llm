@@ -268,23 +268,69 @@ quality with the eval) moves the bill more than swapping models does.
 
 ---
 
-## 3. Other deferred items
+## 3. Embedding in the app docs (Read the Docs)
 
-- **More apps.** qsirecon is added (config + `neighbors` wiring, both directions
-  with qsiprep). Building it also added the cross-app machinery once:
-  list-valued `where` scoping (`app ∈ {app, *neighbors}`) and a per-app `notes`
-  field injected into the system prompt to correct known confusions (e.g.
-  reconstruction is qsirecon's, not qsiprep's). With that in place, further apps
-  (aslprep, xcp-d, cubids, freesurfer-post, modelarray) are **config-only** —
-  add an `apps` entry, `notes` if needed, re-ingest. Probe each first for tag
-  health. FreeSurfer proper is out of scope (not lab-maintained); a lab wrapper
-  like freesurfer-post fits. Remaining operational step for qsirecon: re-ingest
-  + `src.checkouts` + republish the index asset + refresh the server.
+**Goal:** let a user reading an app's RTD docs ask the assistant right there,
+auto-scoped to that app and — ideally — the doc version they're viewing. Highest-
+value expansion (meets users where they're stuck) and the backend is already
+built for it: per-app scoping, version-hint handling, and per-app `notes` all
+exist. What's missing is a delivery layer and one decision. **On hold.**
+
+### The gating decision: embedding public docs = going public
+
+RTD docs are public, so an embedded widget makes the assistant public — anyone
+reading the docs can spend tokens. This is the same go-public gate as §2, just
+triggered by the embed. The shared Caddy password can't gate a public widget, so
+this requires: the daily spend cap (done) **plus a per-client rate limit** (so
+one script can't drain the day's budget) and probably bot mitigation. Do not
+embed until that's in place.
+
+### Three tiers of effort
+
+- **Tier 0 — deep-link (do first; ~1 hr, no exposure change).** Add
+  `?app=<name>` query-param support to `app.py` (read `st.query_params` on load,
+  skip the landing, pre-scope), then put a link in each docs site: "Ask the
+  PennLINC Assistant about QSIPrep →". Opens the existing **password-gated** app
+  already scoped to that tool. In-context entry point, most of the value, no
+  public-exposure change.
+- **Tier 1 — iframe the Streamlit app.** `?embed=true&app=…` as a floating
+  panel. Quick but requires dropping the gate (→ public) and a full Streamlit
+  app in an iframe is a heavy, awkward widget. **Skip** — worst of both.
+- **Tier 2 — proper widget (the real target; ~1 week, gated on go-public).**
+  A small floating "Ask" button injected into the docs that opens a lightweight
+  chat panel calling a backend **API**. Pieces:
+  - An HTTP API layer (e.g. FastAPI) wrapping the answer pipeline — the app only
+    speaks Streamlit today, so this is the main new piece. (Independently useful:
+    same API would back a Slack bot or any non-Streamlit surface.)
+  - A small JS/CSS chat widget injected per docs site via `html_js_files` in each
+    repo's Sphinx `conf.py` (a small PR to qsiprep, qsirecon, … — lab-controlled).
+  - Read the **RTD doc version** the user is viewing, pass it as the version
+    hint — the automatic version-awareness payoff.
+  - CORS + frame-ancestors config, plus the rate-limiting/public story above.
+
+**Verify before building Tier 2:** RTD's JS-injection and version-context
+mechanism changed with their "Addons" system (~2024–25); confirm the current
+injection API and version variable against live RTD rather than trusting the old
+`READTHEDOCS_DATA` name.
+
+**Recommendation:** Tier 0 whenever (cheap win); Tier 2 as the goal once the
+go-public decision is made; skip Tier 1.
+
+## 4. Other deferred items
+
+- **More apps.** qsiprep, qsirecon, aslprep, xcp_d are live (4-app index).
+  Building qsirecon added the cross-app machinery once: list-valued `where`
+  scoping (`app ∈ {app, *neighbors}`) and a per-app `notes` field injected into
+  the system prompt to correct known confusions (e.g. reconstruction is
+  qsirecon's, not qsiprep's). With that in place, further apps (cubids,
+  freesurfer-post, modelarray) are **config-only** — add an `apps` entry,
+  `blurb`, `notes` if needed, re-ingest. Probe each first for tag health (e.g.
+  xcp_d's real NeuroStars signal is under `xcp_d`, not `xcp-d`). FreeSurfer
+  proper is out of scope (not lab-maintained); a lab wrapper like
+  freesurfer-post fits but currently has too little of its own issue/doc signal.
 - **Issue-draft-to-GitHub** — v0 prints the draft; filing it and duplicate-
   checking open issues needs auth, so it rides with hosting.
 - **Answer-eval methodology** — the current LLM judge scores against stale
   point-in-time fixes and is pessimistic; judge for "correct and actionable"
   instead, or lean on the feedback-derived regression set, which is
   maintainer-verified current truth.
-- **RTD embed** — pass `READTHEDOCS_DATA` version into the app so docs-embedded
-  questions are version-aware.
