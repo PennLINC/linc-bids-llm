@@ -34,6 +34,19 @@ def test_summarize_counts():
     assert len(s["failures"]) == 3
 
 
+def test_summarize_by_app():
+    entries = [
+        {"rating": "up", "app": "qsiprep", "path": "oneshot"},
+        {"rating": "down", "app": "xcp_d", "path": "agent"},
+        {"rating": "up", "app": "xcp_d", "path": "oneshot"},
+        {"rating": "down", "path": "agent"},          # no app -> "?"
+    ]
+    s = summarize(entries)
+    assert s["by_app"]["qsiprep"] == {"up": 1, "down": 0, "total": 1}
+    assert s["by_app"]["xcp_d"] == {"up": 1, "down": 1, "total": 2}
+    assert s["by_app"]["?"]["total"] == 1
+
+
 def test_summarize_by_model_enables_comparison():
     entries = [
         {"rating": "up", "path": "agent", "model": "gpt-5.6-terra"},

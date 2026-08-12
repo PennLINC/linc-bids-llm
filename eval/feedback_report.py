@@ -36,30 +36,31 @@ def summarize(entries: list[dict]) -> dict:
     total = len(entries)
     up = sum(1 for e in entries if e.get("rating") == "up")
     down = sum(1 for e in entries if e.get("rating") == "down")
+    by_app: dict = {}
     by_path: dict = {}
     by_model: dict = {}
     by_category: dict = {}
-    for e in entries:
-        p = e.get("path", "?")
-        slot = by_path.setdefault(p, {"up": 0, "down": 0, "total": 0})
+
+    def tally(bucket: dict, key, rating):
+        slot = bucket.setdefault(key, {"up": 0, "down": 0, "total": 0})
         slot["total"] += 1
-        if e.get("rating") in ("up", "down"):
-            slot[e["rating"]] += 1
-        # Model breakdown: what makes an open-vs-closed comparison readable.
+        if rating in ("up", "down"):
+            slot[rating] += 1
+
+    for e in entries:
+        rating = e.get("rating")
+        tally(by_app, e.get("app", "?"), rating)
+        tally(by_path, e.get("path", "?"), rating)
         # Older entries predate provenance capture and land under "(unknown)".
-        m = e.get("model") or "(unknown)"
-        mslot = by_model.setdefault(m, {"up": 0, "down": 0, "total": 0})
-        mslot["total"] += 1
-        if e.get("rating") in ("up", "down"):
-            mslot[e["rating"]] += 1
+        tally(by_model, e.get("model") or "(unknown)", rating)
         cat = e.get("category")
         if cat:
             by_category[cat] = by_category.get(cat, 0) + 1
     failures = [e for e in entries if e.get("rating") == "down"]
     return {
         "total": total, "up": up, "down": down,
-        "by_path": by_path, "by_model": by_model, "by_category": by_category,
-        "failures": failures,
+        "by_app": by_app, "by_path": by_path, "by_model": by_model,
+        "by_category": by_category, "failures": failures,
     }
 
 
@@ -85,6 +86,11 @@ def main():
     if rated:
         print(f"  thumbs up: {s['up']} ({s['up'] / rated:.0%})   "
               f"down: {s['down']} ({s['down'] / rated:.0%})")
+    print("  by app:")
+    for a, v in sorted(s["by_app"].items()):
+        r = v["up"] + v["down"]
+        rate = f"{v['up'] / r:.0%} up" if r else "unrated"
+        print(f"    {a:10s} {v['total']:3d} total, {rate}")
     print("  by path:")
     for p, v in sorted(s["by_path"].items()):
         r = v["up"] + v["down"]
@@ -103,7 +109,7 @@ def main():
         print(f"\n  failures ({len(s['failures'])}):")
         for e in s["failures"]:
             q = " ".join((e.get("question") or "").split())[:80]
-            print(f"    [{e.get('path','?')}] {q}")
+            print(f"    [{e.get('app','?')}/{e.get('path','?')}] {q}")
             if e.get("category"):
                 print(f"        category: {e['category']}")
             if e.get("correct_url"):
