@@ -86,13 +86,23 @@ def ensure_checkout(config: dict, app: str, repo: str, tag: str) -> Path:
 
 
 def update_main(config: dict, app: str, repo: str) -> Path:
-    """Clone main, or fast-forward it if already present (tags never move; main
-    does, so it's the one checkout worth refreshing)."""
+    """Clone main, or refresh it if already present (tags never move; main does,
+    so it's the one checkout worth refreshing).
+
+    Uses fetch + hard reset, not `pull --ff-only`: a shallow --depth 1 clone
+    can't fast-forward once upstream main advances past its single commit
+    (git aborts with 'Not possible to fast-forward', exit 128). A broken/
+    unfetchable checkout is wiped and re-cloned."""
     path = checkout_path(config, app, MAIN)
     if (path / ".git").exists():
-        subprocess.run(["git", "-C", str(path), "pull", "--depth", "1",
-                        "--ff-only"], check=True, capture_output=True, text=True)
-        return path
+        fetched = subprocess.run(
+            ["git", "-C", str(path), "fetch", "--depth", "1", "origin", MAIN],
+            capture_output=True, text=True)
+        if fetched.returncode == 0:
+            subprocess.run(["git", "-C", str(path), "reset", "--hard", "FETCH_HEAD"],
+                           check=True, capture_output=True, text=True)
+            return path
+        shutil.rmtree(path, ignore_errors=True)  # can't refresh -> reclone fresh
     return ensure_checkout(config, app, repo, MAIN)
 
 
