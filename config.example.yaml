@@ -7,6 +7,7 @@ contact_email: you@example.edu     # goes in the crawl User-Agent (be reachable)
 apps:
   qsiprep:
     github_repo: PennLINC/qsiprep
+    blurb: "Preprocessing of diffusion MRI (dMRI)."
     docs_paths: [docs/]            # within the repo; rendered RTD not needed
     neurostars_tags: [qsiprep]
     neurostars_search: []          # extra search terms if tagging is spotty
@@ -23,6 +24,7 @@ apps:
 
   qsirecon:
     github_repo: PennLINC/qsirecon
+    blurb: "Reconstruction & tractography from QSIPrep outputs."
     docs_paths: [docs/]
     neurostars_tags: [qsirecon]
     neurostars_search: []
@@ -36,14 +38,16 @@ apps:
 
   aslprep:
     github_repo: PennLINC/aslprep
+    blurb: "Preprocessing of arterial spin labeling (ASL) MRI."
     docs_paths: [docs/]
     neurostars_tags: [aslprep]
     neurostars_search: []
     checkout_tags: 3
-    neighbors: []                 # its downstream (xcp-d input path) isn't in our set
+    neighbors: []
 
   xcp_d:
     github_repo: PennLINC/xcp_d
+    blurb: "Post-processing & denoising of fMRIPrep BOLD derivatives."
     docs_paths: [docs/]
     # Community tags under xcp_d (~176); xcpd/xcp-d are minor variants. Do NOT
     # add `xcpengine` — that's the deprecated predecessor, different software.

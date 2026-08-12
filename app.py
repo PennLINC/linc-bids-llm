@@ -166,7 +166,7 @@ def answer_turn(question: str, app: str, mode: str, config: dict, store,
 
 # --- entry --------------------------------------------------------------------
 
-st.set_page_config(page_title="bids-assistant", page_icon="🧠")
+st.set_page_config(page_title="PennLINC Assistant", page_icon="🧠")
 
 try:
     config, manifest, store, budget = setup()
@@ -176,11 +176,40 @@ except SystemExit as e:
 
 apps = list(config["apps"].keys())
 
+
+def _blurb(app: str) -> str:
+    return (config["apps"].get(app) or {}).get("blurb", "")
+
+
+# --- landing page: choose a tool ---------------------------------------------
+# No app selected yet (fresh visit, or "All tools" clicked) -> show the picker.
+if st.session_state.get("app") not in apps:
+    st.title("PennLINC Assistant")
+    st.caption("Troubleshooting for the lab's BIDS Apps. Pick a tool to start — "
+               "every answer links back to the issue, thread, doc, or "
+               "version-pinned code it came from.")
+    st.write("")
+    cols = st.columns(2)
+    for i, a in enumerate(apps):
+        with cols[i % 2].container(border=True):
+            st.subheader(a)
+            st.caption(_blurb(a) or "​")   # zero-width keeps card heights even
+            if st.button("Open", key=f"open::{a}", use_container_width=True):
+                st.session_state.app = a
+                st.rerun()
+    st.stop()
+
+app = st.session_state.app
+
 with st.sidebar:
-    st.title("bids-assistant")
-    st.caption("Troubleshooting for the lab's BIDS Apps — every answer links "
-               "back to issues, threads, docs, or version-pinned code.")
-    app = st.selectbox("App", apps) if len(apps) > 1 else apps[0]
+    st.title("PennLINC Assistant")
+    if st.button("← All tools", use_container_width=True):
+        st.session_state.app = None
+        st.rerun()
+    app = st.selectbox("App", apps, index=apps.index(app))
+    st.session_state.app = app
+    if _blurb(app):
+        st.caption(_blurb(app))
     mode = st.radio("Answer mode", ["Auto", "One-shot", "Agent"], horizontal=True,
                     help="Auto routes FAQ-shaped questions to a fast one-shot "
                          "answer and tracebacks/code questions to the agent.")
