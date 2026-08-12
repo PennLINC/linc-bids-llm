@@ -34,8 +34,30 @@ apps:
         qsiprep's old built-in --recon functionality; recon_spec.yaml and
         --recon-spec belong here, not in qsiprep."
 
-  # Add more the same way (config, not code) — e.g. aslprep, xcp-d, cubids,
-  # freesurfer-post, modelarray. Probe each first (probes/) for tag health.
+  aslprep:
+    github_repo: PennLINC/aslprep
+    docs_paths: [docs/]
+    neurostars_tags: [aslprep]
+    neurostars_search: []
+    checkout_tags: 3
+    neighbors: []                 # its downstream (xcp-d input path) isn't in our set
+
+  xcp_d:
+    github_repo: PennLINC/xcp_d
+    docs_paths: [docs/]
+    # Community tags under xcp_d (~176); xcpd/xcp-d are minor variants. Do NOT
+    # add `xcpengine` — that's the deprecated predecessor, different software.
+    neurostars_tags: [xcp_d, xcpd, xcp-d]
+    neurostars_search: []
+    checkout_tags: 3
+    neighbors: []                 # consumes fMRIPrep derivatives, not in our set
+    notes:
+      - "XCP-D (xcp_d) is the current post-processing / denoising tool for
+        fMRIPrep BOLD derivatives, and the successor to the deprecated
+        xcpEngine. Point xcpEngine questions to the XCP-D equivalent."
+
+  # Add more the same way (config, not code) — cubids, freesurfer-post,
+  # modelarray. Probe each first (probes/) for tag health.
 
 retrieval:
   top_k: 8                         # wider than linc-llm; answers run longer
