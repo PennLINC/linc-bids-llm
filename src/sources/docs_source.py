@@ -14,7 +14,7 @@ from urllib.parse import quote
 from .. import common
 from . import github_api
 
-DOC_EXTENSIONS = {".md", ".rst", ".txt"}
+DOC_EXTENSIONS = {".md", ".rst", ".txt", ".rmd"}  # .rmd = R Markdown vignettes
 MAX_FILE_BYTES = 1_000_000  # skip anything bigger; real docs never are
 
 

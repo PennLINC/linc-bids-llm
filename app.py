@@ -174,7 +174,9 @@ except SystemExit as e:
     st.error(str(e))
     st.stop()
 
-apps = list(config["apps"].keys())
+# Apps shown as their own tool. `hidden` apps still exist for neighbor scoping
+# (e.g. ModelArrayIO rides under ModelArray) but get no card / selector entry.
+apps = [a for a, d in config["apps"].items() if not (d or {}).get("hidden")]
 
 
 def _blurb(app: str) -> str:

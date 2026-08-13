@@ -60,8 +60,30 @@ apps:
         fMRIPrep BOLD derivatives, and the successor to the deprecated
         xcpEngine. Point xcpEngine questions to the XCP-D equivalent."
 
-  # Add more the same way (config, not code) — cubids, freesurfer-post,
-  # modelarray. Probe each first (probes/) for tag health.
+  # ModelArray (R stats) + ModelArrayIO (Python HDF5 converter) are two halves
+  # of one workflow — presented as a single "modelarray" tool. ModelArrayIO is
+  # `hidden` (no card) but rides in via neighbor scoping so its docs/issues are
+  # retrievable. Neither has NeuroStars threads.
+  modelarray:
+    github_repo: PennLINC/ModelArray
+    blurb: "Mass-univariate statistical analysis of fixel-wise (and other) data."
+    docs_paths: [vignettes/]        # R package docs are .Rmd vignettes, not docs/
+    neurostars_tags: []
+    neurostars_search: []
+    checkout_tags: 3
+    neighbors: [modelarrayio]
+
+  modelarrayio:
+    github_repo: PennLINC/ModelArrayIO
+    docs_paths: [docs/]
+    neurostars_tags: []
+    neurostars_search: []
+    checkout_tags: 3
+    neighbors: [modelarray]
+    hidden: true                    # part of the ModelArray tool, not its own card
+
+  # Add more the same way (config, not code) — cubids, freesurfer-post.
+  # Probe each first (probes/) for tag health.
 
 retrieval:
   top_k: 8                         # wider than linc-llm; answers run longer

@@ -12,6 +12,13 @@ def test_wanted_filters():
     assert not docs_source._wanted("docs/_static/logo.png", docs_paths)
 
 
+def test_wanted_rmd_vignettes():
+    # R packages (ModelArray) keep docs as .Rmd vignettes, not in docs/
+    assert docs_source._wanted("vignettes/walkthrough.Rmd", ["vignettes/"])
+    assert docs_source._wanted("vignettes/UPPER.RMD", ["vignettes/"])  # case-insensitive
+    assert not docs_source._wanted("R/model.R", ["vignettes/"])        # R source excluded
+
+
 def test_blob_url_is_tag_pinned_plain():
     url = docs_source.blob_url("PennLINC/qsiprep", "1.0.1", "docs/usage.rst")
     assert url == "https://github.com/PennLINC/qsiprep/blob/1.0.1/docs/usage.rst?plain=1"
