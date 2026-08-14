@@ -82,8 +82,17 @@ apps:
     neighbors: [modelarray]
     hidden: true                    # part of the ModelArray tool, not its own card
 
-  # Add more the same way (config, not code) — cubids, freesurfer-post.
-  # Probe each first (probes/) for tag health.
+  cubids:
+    github_repo: PennLINC/CuBIDS
+    blurb: "Curation & validation of BIDS datasets."
+    docs_paths: [docs/]
+    neurostars_tags: [cubids]        # thin (~2 topics); the corpus is its issues
+    neurostars_search: []
+    checkout_tags: 3
+    neighbors: []
+
+  # Add more the same way (config, not code) — e.g. freesurfer-post once it has
+  # more of its own issue/doc signal. Probe each first (probes/) for tag health.
 
 retrieval:
   top_k: 8                         # wider than linc-llm; answers run longer

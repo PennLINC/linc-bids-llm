@@ -32,6 +32,12 @@ CATEGORIES = ["— (looked good)", "wrong fix / advice", "bad or broken sources"
               "hallucination / made-up detail", "wrong version",
               "didn't escalate / ask for info", "other"]
 
+# TEMPORARY (testing phase): chat history is saved on the server for evaluation.
+# Remove this banner + its two render sites once testing wraps.
+DISCLAIMER = ("⚠️ **Testing preview** — your chat history is saved on the server "
+              "for evaluation. Please **don't enter personal or sensitive "
+              "information**.")
+
 
 @st.cache_resource
 def setup():
@@ -190,6 +196,7 @@ if st.session_state.get("app") not in apps:
     st.caption("Troubleshooting for the lab's BIDS Apps. Pick a tool to start — "
                "every answer links back to the issue, thread, doc, or "
                "version-pinned code it came from.")
+    st.warning(DISCLAIMER)          # TEMPORARY (testing phase)
     st.write("")
     cols = st.columns(2)
     for i, a in enumerate(apps):
@@ -212,6 +219,7 @@ with st.sidebar:
     st.session_state.app = app
     if _blurb(app):
         st.caption(_blurb(app))
+    st.warning(DISCLAIMER)          # TEMPORARY (testing phase)
     mode = st.radio("Answer mode", ["Auto", "One-shot", "Agent"], horizontal=True,
                     help="Auto routes FAQ-shaped questions to a fast one-shot "
                          "answer and tracebacks/code questions to the agent.")
