@@ -177,6 +177,47 @@ Development workflow is unchanged (branch → PR → merge to main). Deployment 
 `scripts/deploy.sh`, or trigger from a GitHub Action over SSH later. Re-run
 `fetch_index.sh` after a fresh ingest; restart to pick up the swapped index.
 
+### Custom domain — pennlinc-llm.com (Namecheap)
+
+Replaces the interim `sslip.io` hostname with a real domain. ~$10–15/yr for a
+`.com`; keep auto-renew on so it never lapses (a lapsed domain would take the
+site down). Not yet done.
+
+1. **Buy it (Namecheap).** namecheap.com → search `pennlinc-llm.com` → add to
+   cart → checkout. Turn on **Domain Privacy** (free, hides registrant WHOIS)
+   and **Auto-Renew**.
+2. **Point DNS at the server.** Namecheap → Domain List → **Manage → Advanced
+   DNS** (nameservers stay on the default "Namecheap BasicDNS"):
+   - Delete the default parking / redirect records Namecheap pre-adds.
+   - Add an **A record**: Host `@` → Value = the **Lightsail static IP**, TTL Automatic.
+   - Add an **A record**: Host `www` → same static IP (so `www` resolves too).
+3. **Point Caddy at the domain (on the server).** `sudo nano /etc/caddy/Caddyfile`
+   and change the site line from `<dashed-ip>.sslip.io {` to a two-name block,
+   keeping the existing auth + proxy:
+   ```
+   pennlinc-llm.com, www.pennlinc-llm.com {
+       basic_auth { tester <bcrypt-hash> }
+       reverse_proxy 127.0.0.1:8501
+   }
+   ```
+   Then `sudo systemctl reload caddy`. Port 443 is already open in the Lightsail
+   firewall — nothing to change there.
+4. **Wait + verify.** DNS propagation is minutes to a few hours; check with
+   `dig +short pennlinc-llm.com` (should return the static IP). Once it resolves,
+   Caddy auto-issues a Let's Encrypt cert on its own — **don't reload caddy
+   repeatedly** while waiting (Let's Encrypt rate-limits failed attempts; Caddy
+   already retries with backoff). Then open `https://pennlinc-llm.com`, confirm
+   the login + app, and update the link shared with colleagues.
+
+**Notes.**
+- The `sslip.io` URL keeps working unless you remove its block from the
+  Caddyfile — fine to leave as a fallback during the switch.
+- Alternative worth a quick check: a Penn-provided `*.upenn.edu` subdomain (ask
+  IT) avoids the purchase and keeps it on institutional DNS; the Namecheap route
+  is just fully self-serve.
+- Optional: redirect `www` → apex for one canonical URL; the two-name block above
+  simply serves both.
+
 ### Auth and cost control (required before public exposure)
 
 Every question costs money, so an unauthenticated public endpoint is a cost
