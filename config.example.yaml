@@ -12,7 +12,7 @@ apps:
     neurostars_tags: [qsiprep]
     neurostars_search: []          # extra search terms if tagging is spotty
     checkout_tags: 5               # latest N release tags + main
-    neighbors: [qsirecon]          # pipeline neighbors, retrieved alongside
+    neighbors: [qsirecon, qsiplan] # pipeline neighbors, retrieved alongside
     # `notes` correct known confusions the corpus/model gets wrong; they're
     # injected into the system prompt whenever this app is in scope.
     notes:
@@ -35,6 +35,22 @@ apps:
         (tractography, scalar maps, connectivity). It is the successor to
         qsiprep's old built-in --recon functionality; recon_spec.yaml and
         --recon-spec belong here, not in qsiprep."
+
+  # QSIPlan (workflow planner, split into its own repo) is combined under the
+  # hood with QSIPrep — the same way ModelArrayIO rides under ModelArray. It
+  # plans/explains QSIPrep's dMRI preprocessing from BIDS metadata + flags;
+  # future QSIPrep releases use it and mirror its docs. `hidden` (no card /
+  # selector entry) but pulled into scope as a qsiprep neighbor so its
+  # docs/issues are retrievable. New repo: docs live in the README, no
+  # NeuroStars threads yet.
+  qsiplan:
+    github_repo: PennLINC/QSIPlan
+    docs_paths: [docs/]            # no docs/ dir yet; top-level README rides along
+    neurostars_tags: []
+    neurostars_search: []
+    checkout_tags: 5
+    neighbors: [qsiprep]
+    hidden: true                   # part of the QSIPrep tool, not its own card
 
   aslprep:
     github_repo: PennLINC/aslprep
