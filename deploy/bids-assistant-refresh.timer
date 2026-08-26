@@ -1,0 +1,11 @@
+# Runs the refresh nightly. Install alongside the .service (see DEPLOY.md).
+[Unit]
+Description=Nightly bids-assistant refresh
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true            # run on next boot if the box was off at 03:30
+RandomizedDelaySec=600     # jitter to avoid a fixed-time API burst
+
+[Install]
+WantedBy=timers.target

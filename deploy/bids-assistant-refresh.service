@@ -1,0 +1,20 @@
+# Oneshot service that runs the nightly refresh (checkouts + index). Triggered
+# by bids-assistant-refresh.timer, not enabled directly. Install both:
+#   sudo cp deploy/bids-assistant-refresh.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now bids-assistant-refresh.timer
+#
+# refresh.sh restarts the app service via sudo, so this user needs a scoped
+# sudoers rule (see DEPLOY.md). Edit User/paths if yours differ.
+[Unit]
+Description=bids-assistant refresh (update checkouts + index)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/linc-bids-llm
+Environment=HOME=/home/ubuntu
+ExecStart=/home/ubuntu/linc-bids-llm/scripts/refresh.sh
+# Refresh does a full harvest of any new/changed content; give it room.
+TimeoutStartSec=3600

@@ -96,3 +96,16 @@ def test_load_config_missing_path_fails(tmp_path):
     with pytest.raises(FileNotFoundError):
         common.load_config(str(tmp_path / "nope.yaml"))
     common.load_config.cache_clear()
+
+
+def test_load_config_index_path_override(tmp_path, monkeypatch):
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("index:\n  path: ./index\n")
+    common.load_config.cache_clear()
+    monkeypatch.setenv("BIDS_INDEX_PATH", "index.staging")
+    loaded = common.load_config(str(cfg))
+    assert loaded["index"]["path"] == "index.staging"   # env wins (refresh staging)
+    common.load_config.cache_clear()
+    monkeypatch.delenv("BIDS_INDEX_PATH")
+    assert common.load_config(str(cfg))["index"]["path"] == "./index"
+    common.load_config.cache_clear()

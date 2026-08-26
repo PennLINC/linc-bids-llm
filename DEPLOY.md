@@ -140,7 +140,35 @@ scripts/deploy.sh                 # git pull + deps + restart service
 
 ## 7. Refreshing the index + checkouts
 
-**Today (manual, asset-based):** rebuild elsewhere, publish, pull on the server:
+**Automatic (recommended) — the server self-refreshes nightly.** A `systemd`
+timer runs `scripts/refresh.sh`, which updates checkouts (`main` via fetch+reset
+and any new release tags), rebuilds the index **incrementally into a staging
+dir**, validates it, swaps it in atomically, and restarts the service. No manual
+steps, no stale `main`/versions. One-time setup:
+
+```bash
+# the server needs a GITHUB_TOKEN for harvesting — add it to .env
+printf 'GITHUB_TOKEN=github_pat_...\n' >> .env
+
+# let the refresh restart the app service without a password (scoped sudoers rule)
+echo 'ubuntu ALL=(root) NOPASSWD: /usr/bin/systemctl restart bids-assistant' \
+  | sudo tee /etc/sudoers.d/bids-assistant-refresh
+
+# install + enable the nightly timer
+sudo cp deploy/bids-assistant-refresh.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now bids-assistant-refresh.timer
+sudo systemctl start  bids-assistant-refresh.service   # run once now (optional)
+
+systemctl list-timers bids-assistant-refresh.timer     # confirm it's scheduled
+journalctl -u bids-assistant-refresh.service -n 40     # read the last run's log
+```
+
+Adjust the cadence in the `.timer` (`OnCalendar=`); nightly is cheap since ingest
+is incremental. Runs are logged to the journal. A failed refresh leaves the live
+index untouched (it only swaps a validated staging build).
+
+**Manual (fallback / one-off):** rebuild elsewhere and pull the published asset:
 
 ```bash
 # maintainer machine
@@ -149,13 +177,8 @@ python -m src.ingest && scripts/package_index.sh --upload
 REFRESH_INDEX=1 scripts/deploy.sh
 ```
 
-`fetch_index.sh` swaps the index atomically (old moved aside) and the restart
-picks up the new one — the app never reads a half-written index.
-
-**Planned (automatic):** a weekly `systemd` timer on the box that updates
-checkouts + runs an incremental ingest to a staging dir, swaps, and restarts —
-so the server self-refreshes. Needs a `GITHUB_TOKEN` in `.env`. See ROADMAP §2;
-not built yet.
+The GitHub release asset is now just a backup/distribution snapshot — the server
+no longer depends on it once the timer is enabled.
 
 ## What survives a redeploy, what doesn't
 

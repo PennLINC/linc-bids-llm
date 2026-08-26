@@ -11,7 +11,7 @@ apps:
     docs_paths: [docs/]            # within the repo; rendered RTD not needed
     neurostars_tags: [qsiprep]
     neurostars_search: []          # extra search terms if tagging is spotty
-    checkout_tags: 3               # latest N release tags + main
+    checkout_tags: 5               # latest N release tags + main
     neighbors: [qsirecon]          # pipeline neighbors, retrieved alongside
     # `notes` correct known confusions the corpus/model gets wrong; they're
     # injected into the system prompt whenever this app is in scope.
@@ -28,7 +28,7 @@ apps:
     docs_paths: [docs/]
     neurostars_tags: [qsirecon]
     neurostars_search: []
-    checkout_tags: 3
+    checkout_tags: 5
     neighbors: [qsiprep]           # takes qsiprep's preprocessed outputs as input
     notes:
       - "qsirecon does RECONSTRUCTION / post-processing of qsiprep outputs
@@ -42,7 +42,7 @@ apps:
     docs_paths: [docs/]
     neurostars_tags: [aslprep]
     neurostars_search: []
-    checkout_tags: 3
+    checkout_tags: 5
     neighbors: []
 
   xcp_d:
@@ -53,7 +53,7 @@ apps:
     # add `xcpengine` — that's the deprecated predecessor, different software.
     neurostars_tags: [xcp_d, xcpd, xcp-d]
     neurostars_search: []
-    checkout_tags: 3
+    checkout_tags: 5
     neighbors: []                 # consumes fMRIPrep derivatives, not in our set
     notes:
       - "XCP-D (xcp_d) is the current post-processing / denoising tool for
@@ -70,7 +70,7 @@ apps:
     docs_paths: [vignettes/]        # R package docs are .Rmd vignettes, not docs/
     neurostars_tags: []
     neurostars_search: []
-    checkout_tags: 3
+    checkout_tags: 5
     neighbors: [modelarrayio]
 
   modelarrayio:
@@ -78,7 +78,7 @@ apps:
     docs_paths: [docs/]
     neurostars_tags: []
     neurostars_search: []
-    checkout_tags: 3
+    checkout_tags: 5
     neighbors: [modelarray]
     hidden: true                    # part of the ModelArray tool, not its own card
 
@@ -88,7 +88,7 @@ apps:
     docs_paths: [docs/]
     neurostars_tags: [cubids]        # thin (~2 topics); the corpus is its issues
     neurostars_search: []
-    checkout_tags: 3
+    checkout_tags: 5
     neighbors: []
 
   # Add more the same way (config, not code) — e.g. freesurfer-post once it has

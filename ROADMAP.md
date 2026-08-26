@@ -119,29 +119,26 @@ Single small instance, mirroring the local setup:
   no backup. `.feedback/`, `.chats/`, `.state/` **do** — sync them to S3 (or move
   feedback to a small database) or they die with the instance.
 
-### Index refresh (decided; not yet built)
+### Index refresh — BUILT (Model A: server self-refreshes)
 
-Today: manual + asset-based — rebuild elsewhere, `package_index.sh --upload`,
-then `REFRESH_INDEX=1 scripts/deploy.sh` on the server (`fetch_index.sh` swaps
-atomically). Two ways to automate:
+Implemented as `scripts/refresh.sh` + `deploy/bids-assistant-refresh.{service,timer}`.
+A nightly `systemd` timer runs `src.checkouts` (updates `main` via fetch+reset +
+clones new release tags), rebuilds the index with an **incremental** `src.ingest`
+into a **staging dir** (`BIDS_INDEX_PATH` override), validates it (non-empty),
+**swaps it in atomically**, and restarts the service so the app reopens it.
+Incremental is cheap (only changed threads), so nightly is fine even on 2 GB.
+Requires a **`GITHUB_TOKEN`** in the server `.env` and a scoped sudoers rule for
+the restart. Never ingests in place — the live app holds Chroma/SQLite open, and
+a validated staging build only replaces the live index if the ingest succeeds
+(a failed run leaves the live index untouched). Setup steps: DEPLOY.md §7.
 
-- **Model A — server self-refreshes (recommended for one box).** A weekly
-  `systemd` timer runs `src.checkouts` (updates main + new release tags) and an
-  **incremental** `src.ingest`, builds to a **staging dir**, swaps atomically,
-  and restarts the service. Incremental is cheap (only threads changed since
-  last run), so it's fast/low-memory even on 2 GB. Requires a **`GITHUB_TOKEN`**
-  in the server `.env` for harvesting. **Never ingest in place** — the live app
-  holds the Chroma/SQLite open and a concurrent write can corrupt it.
-- **Model B — build elsewhere, server pulls.** A scheduled job (maintainer
-  machine or GitHub Actions) rebuilds + republishes the asset; a server timer
-  pulls it. Keeps the server token-free and light; the asset is the source of
-  truth. More moving parts.
+Verified locally: a refresh caught real drift (22 changed qsiprep issues since
+the prior build), staged + validated 11.8k chunks, swapped cleanly with no
+leftover dirs, and the store reopened the new index.
 
-**Is the GitHub release asset still needed?** Under Model A, not for serving —
-it becomes an optional golden-copy backup (and for local users / a second host);
-the refresh script can re-publish it so it stays current. Under Model B it's the
-mechanism. Recommend **Model A** for the single lab box, keeping the asset as a
-periodic backup.
+The alternative (**Model B** — build elsewhere + server pulls the release asset)
+stays available as the manual fallback. Under Model A the **GitHub release asset
+is no longer load-bearing** — it's just an optional backup/distribution snapshot.
 
 Skip ECS/Fargate/EKS unless there's a reason; at this scale they add moving
 parts without benefit.

@@ -45,13 +45,22 @@ def load_dotenv(path: Path | None = None) -> None:
 
 @functools.lru_cache(maxsize=1)
 def load_config(path: str | None = None) -> dict:
-    """Load config.yaml (falling back to config.example.yaml) and .env."""
+    """Load config.yaml (falling back to config.example.yaml) and .env.
+
+    `BIDS_INDEX_PATH` in the environment overrides index.path — used by the
+    refresh job to build the index in a staging dir without touching the live
+    one that the running app has open.
+    """
     load_dotenv()
     candidates = [Path(path)] if path else [ROOT / "config.yaml", ROOT / "config.example.yaml"]
     for candidate in candidates:
         if candidate.exists():
             with open(candidate) as f:
-                return yaml.safe_load(f)
+                config = yaml.safe_load(f)
+            override = os.environ.get("BIDS_INDEX_PATH")
+            if override:
+                config.setdefault("index", {})["path"] = override
+            return config
     raise FileNotFoundError(
         f"No config found (looked for {', '.join(str(c) for c in candidates)}). "
         "Copy config.example.yaml to config.yaml."
