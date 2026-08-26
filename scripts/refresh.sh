@@ -13,6 +13,7 @@
 #   SERVICE  systemd service to restart (default: bids-assistant)
 #   SKIP_CHECKOUTS=1  skip the checkout update (faster; for testing)
 #   SKIP_RESTART=1    don't restart the service (auto-skipped when systemctl absent)
+#   SKIP_PUBLISH=1    don't re-publish the index release asset
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -22,6 +23,14 @@ INDEX="index"
 STAGING="index.staging"
 
 log() { echo "[refresh $(date -u +%FT%TZ)] $*"; }
+
+# Let gh authenticate non-interactively from the .env token (used for the asset
+# publish). The token needs write access to the repo; a read-only harvest token
+# just makes the publish step skip with a warning.
+if [ -z "${GH_TOKEN:-}" ] && [ -f .env ]; then
+  tok=$(grep -m1 '^GITHUB_TOKEN=' .env | cut -d= -f2- | sed -e 's/^["'\'']//' -e 's/["'\'']$//')
+  [ -n "$tok" ] && export GH_TOKEN="$tok"
+fi
 
 if [ ! -f "$INDEX/manifest.json" ]; then
   echo "error: no live index at $INDEX/ — build it once with 'python -m src.ingest'." >&2
@@ -66,6 +75,19 @@ if [ "${SKIP_RESTART:-}" != "1" ] && command -v systemctl >/dev/null 2>&1; then
   sudo systemctl restart "$SERVICE"
 else
   log "skipping service restart (SKIP_RESTART set or systemctl absent)."
+fi
+
+# 6. re-publish the release asset (backup + up-to-date index for local dev).
+#    Non-fatal: the live index is already swapped in; a publish failure (no gh,
+#    unauthenticated, or a read-only token) only means the downloadable copy lags.
+if [ "${SKIP_PUBLISH:-}" != "1" ]; then
+  log "publishing index asset..."
+  if scripts/package_index.sh --upload; then
+    log "asset published."
+  else
+    log "WARNING: asset publish failed (gh missing / unauthenticated / read-only"
+    log "         token). The live index is current regardless; skipping."
+  fi
 fi
 
 log "done."

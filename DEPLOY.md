@@ -143,8 +143,9 @@ scripts/deploy.sh                 # git pull + deps + restart service
 **Automatic (recommended) — the server self-refreshes nightly.** A `systemd`
 timer runs `scripts/refresh.sh`, which updates checkouts (`main` via fetch+reset
 and any new release tags), rebuilds the index **incrementally into a staging
-dir**, validates it, swaps it in atomically, and restarts the service. No manual
-steps, no stale `main`/versions. One-time setup:
+dir**, validates it, swaps it in atomically, restarts the service, and
+**re-publishes the release asset** so the downloadable index stays current for
+local dev. No manual steps, no stale `main`/versions. One-time setup:
 
 ```bash
 # the server needs a GITHUB_TOKEN for harvesting — add it to .env
@@ -167,6 +168,15 @@ journalctl -u bids-assistant-refresh.service -n 40     # read the last run's log
 Adjust the cadence in the `.timer` (`OnCalendar=`); nightly is cheap since ingest
 is incremental. Runs are logged to the journal. A failed refresh leaves the live
 index untouched (it only swaps a validated staging build).
+
+**About the asset re-publish:** `refresh.sh` runs `package_index.sh --upload`
+at the end, authenticating `gh` from the `.env` `GITHUB_TOKEN`. That token must
+have **write** access to the repo (`contents:write`, or classic `repo` scope) to
+publish a release asset — a **read-only harvest token will skip the publish with
+a warning**, and the live index is still current regardless. So either give the
+server's token write scope, or set `SKIP_PUBLISH=1` in the service and publish
+from a maintainer machine instead. `gh` must also be installed on the box for
+this step (the tester `fetch_index.sh` path uses plain `curl` and needs no `gh`).
 
 **Manual (fallback / one-off):** rebuild elsewhere and pull the published asset:
 
