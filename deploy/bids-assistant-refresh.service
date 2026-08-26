@@ -15,6 +15,19 @@ Type=oneshot
 User=ubuntu
 WorkingDirectory=/home/ubuntu/linc-bids-llm
 Environment=HOME=/home/ubuntu
+# Keep the embedding step single-threaded and quiet: on a small (2 GB) box the
+# many BLAS/torch threads add memory + CPU contention with the live app for no
+# throughput win on a batch job. TOKENIZERS_PARALLELISM silences the fork warning.
+Environment=OMP_NUM_THREADS=1
+Environment=MKL_NUM_THREADS=1
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=TOKENIZERS_PARALLELISM=false
 ExecStart=/home/ubuntu/linc-bids-llm/scripts/refresh.sh
 # Refresh does a full harvest of any new/changed content; give it room.
 TimeoutStartSec=3600
+# Be a well-behaved background job: yield CPU and disk to the live app, and —
+# critically on a memory-tight box — make the kernel's OOM killer prefer THIS
+# retryable refresh over the user-facing bids-assistant service if RAM runs low.
+Nice=10
+IOSchedulingClass=idle
+OOMScoreAdjust=500
