@@ -169,13 +169,19 @@ Adjust the cadence in the `.timer` (`OnCalendar=`); nightly is cheap since inges
 is incremental. Runs are logged to the journal. A failed refresh leaves the live
 index untouched (it only swaps a validated staging build).
 
-**About the asset re-publish:** `refresh.sh` runs `package_index.sh --upload`
-at the end, authenticating `gh` from the `.env` `GITHUB_TOKEN`. That token must
-have **write** access to the repo (`contents:write`, or classic `repo` scope) to
-publish a release asset — a **read-only harvest token will skip the publish with
-a warning**, and the live index is still current regardless. So either give the
-server's token write scope, or set `SKIP_PUBLISH=1` in the service and publish
-from a maintainer machine instead. `gh` must also be installed on the box for
+**About the asset re-publish + the two tokens.** Harvesting and publishing use
+different tokens, because publishing needs write access and harvesting doesn't:
+
+- `GITHUB_TOKEN` — harvesting (ingest/checkouts). Read-only is fine.
+- `GH_PUBLISH_TOKEN` — the release-asset publish. Needs **write** access
+  (fine-grained: *Contents read+write* on `PennLINC/linc-bids-llm`, or a classic
+  `repo` token). `refresh.sh` uses this for `gh`, falling back to `GITHUB_TOKEN`
+  only if it's unset.
+
+So keep your read-only `GITHUB_TOKEN` and **add a second line** to the server's
+`.env`: `GH_PUBLISH_TOKEN=...` with the write token. If you skip it, the publish
+step just warns and the live index is current regardless (or set `SKIP_PUBLISH=1`
+and publish from a maintainer machine). `gh` must be installed on the box for
 this step (the tester `fetch_index.sh` path uses plain `curl` and needs no `gh`).
 
 **Manual (fallback / one-off):** rebuild elsewhere and pull the published asset:

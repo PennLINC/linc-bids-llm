@@ -24,11 +24,14 @@ STAGING="index.staging"
 
 log() { echo "[refresh $(date -u +%FT%TZ)] $*"; }
 
-# Let gh authenticate non-interactively from the .env token (used for the asset
-# publish). The token needs write access to the repo; a read-only harvest token
-# just makes the publish step skip with a warning.
+# Publish auth for gh (the asset upload). Prefer a dedicated write-scoped token,
+# GH_PUBLISH_TOKEN, else fall back to GITHUB_TOKEN. Harvesting (python) always
+# uses GITHUB_TOKEN, where read-only is fine — so a read-only GITHUB_TOKEN for
+# harvest + a write GH_PUBLISH_TOKEN for publish is the recommended split.
+# An already-exported GH_TOKEN wins over both.
 if [ -z "${GH_TOKEN:-}" ] && [ -f .env ]; then
-  tok=$(grep -m1 '^GITHUB_TOKEN=' .env | cut -d= -f2- | sed -e 's/^["'\'']//' -e 's/["'\'']$//')
+  _envtok() { grep -m1 "^$1=" .env | cut -d= -f2- | sed -e 's/^["'\'']//' -e 's/["'\'']$//'; }
+  tok="$(_envtok GH_PUBLISH_TOKEN)"; [ -z "$tok" ] && tok="$(_envtok GITHUB_TOKEN)"
   [ -n "$tok" ] && export GH_TOKEN="$tok"
 fi
 
