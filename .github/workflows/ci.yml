@@ -28,11 +28,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # No `cache: pip`: measured, restoring the ~450 MB of wheels takes longer
+      # (6 s) than re-downloading them (2 s); the install is mostly unpacking.
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"   # the linc-bids-llm env's python
-          cache: pip
-          cache-dependency-path: requirements.txt
 
       # test_tools.py skips without rg, and three test_refresh.py tests skip
       # without /usr/bin/flock (so they never run on macOS). Here a missing
