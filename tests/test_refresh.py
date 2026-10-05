@@ -192,11 +192,12 @@ def test_green_run_swaps_packages_restarts_and_publishes(sandbox):
     assert json.loads(sandbox.manifest.read_text()) == NEW
     assert (sandbox.repo / "index" / "fts.sqlite").read_text() == "live-db"   # seeded from live
     assert sandbox.leftovers() == []                            # no index.staging / index.prev.*
-    assert sandbox.calls() == [
+    calls, build = sandbox.calls(), "package_index.sh  GH_TOKEN=<unset>"
+    assert calls.index(build) == calls.index("sudo systemctl restart sandbox-svc") - 1
+    assert [c for c in calls if c != build] == [                # tarball BEFORE the restart
         "python -m src.checkouts",
         "python -m src.ingest BIDS_INDEX_PATH=index.staging",
         "python - index.staging",                               # the validation heredoc
-        "package_index.sh  GH_TOKEN=<unset>",                   # tarball BEFORE the restart
         "sudo systemctl restart sandbox-svc",
         "package_index.sh --upload-only GH_TOKEN=<unset>",
     ]

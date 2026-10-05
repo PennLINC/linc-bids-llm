@@ -12,7 +12,8 @@
 # the systemd unit reports it to healthchecks.io through scripts/hc_ping.sh
 # (which also covers what a script cannot report about itself: timeouts, kills).
 #   0     every step worked
-#   3     the new index is live, but the app restart and/or the asset publish failed
+#   3     the new index is live, but the app restart and/or the asset publish
+#         failed (SKIP_PUBLISH=1 turns publishing off)
 #   else  the run died earlier — normally before the swap, live index untouched
 #
 # Env knobs (all optional):
@@ -20,8 +21,7 @@
 #   SERVICE  systemd service to restart (default: bids-assistant)
 #   SKIP_CHECKOUTS=1  skip the checkout update (faster; for testing)
 #   SKIP_RESTART=1    don't restart the service (auto-skipped when systemctl absent)
-#   SKIP_PUBLISH=1    don't re-publish the index release asset (a publish that is
-#                     attempted and fails ends the run with exit 3)
+#   SKIP_PUBLISH=1    don't re-publish the index release asset
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

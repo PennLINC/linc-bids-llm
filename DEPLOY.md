@@ -185,10 +185,11 @@ journalctl -u bids-assistant-refresh.service -n 40     # read the last run's log
 The timer fires at 03:30 UTC plus up to 10 min of jitter, and catches up at the
 next boot if the box was off at that time. Adjust the cadence in the `.timer`
 (`OnCalendar=`); nightly is cheap since ingest is incremental. Runs are logged
-to the journal. A refresh that fails before the swap (checkouts, ingest,
-validation) leaves the live index untouched — it only swaps a validated staging
-build. Exit status **3** means the new index is live but the app restart or the
-asset publish failed.
+to the journal. A failed refresh leaves the live index untouched (it only swaps
+a validated staging build).
+
+The one exception is exit status **3**: the new index is live, but the app
+restart or the asset publish failed after the swap.
 
 **Monitoring — an e-mail when the nightly refresh fails or stops running.**
 Optional; inert until configured. The unit reports every run to
