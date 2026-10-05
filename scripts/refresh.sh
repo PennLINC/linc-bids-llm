@@ -8,6 +8,10 @@
 # + SQLite) open. Writing to it concurrently can corrupt it, and the app won't
 # see changes without reopening — so we build a copy, swap, and restart.
 #
+# Monitoring: this script never pings anything. Its exit status is the contract;
+# the systemd unit reports it to healthchecks.io through scripts/hc_ping.sh
+# (which also covers what a script cannot report about itself: timeouts, kills).
+#
 # Env knobs (all optional):
 #   ENV_PY   path to the env python   (default: ~/miniforge3/envs/linc-bids-llm/bin/python)
 #   SERVICE  systemd service to restart (default: bids-assistant)
@@ -24,15 +28,27 @@ STAGING="index.staging"
 
 log() { echo "[refresh $(date -u +%FT%TZ)] $*"; }
 
+# No failure may be silent: say where the run died (the tail of this log is
+# what the healthcheck alert e-mail shows).
+trap 'log "FAILED: exit $? at line $LINENO"' ERR
+
+# One KEY=value from .env. Prints nothing — and still succeeds — when the key or
+# the file is missing (a bare `grep | cut` aborts the script under pipefail).
+envval() {
+  { grep -m1 -E "^[[:space:]]*$1[[:space:]]*=" .env 2>/dev/null || true; } \
+    | cut -d= -f2- | tr -d '\r' \
+    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^["'\'']//' -e 's/["'\'']$//'
+}
+
 # Publish auth for gh (the asset upload). Prefer a dedicated write-scoped token,
 # GH_PUBLISH_TOKEN, else fall back to GITHUB_TOKEN. Harvesting (python) always
 # uses GITHUB_TOKEN, where read-only is fine — so a read-only GITHUB_TOKEN for
 # harvest + a write GH_PUBLISH_TOKEN for publish is the recommended split.
 # An already-exported GH_TOKEN wins over both.
-if [ -z "${GH_TOKEN:-}" ] && [ -f .env ]; then
-  _envtok() { grep -m1 "^$1=" .env | cut -d= -f2- | sed -e 's/^["'\'']//' -e 's/["'\'']$//'; }
-  tok="$(_envtok GH_PUBLISH_TOKEN)"; [ -z "$tok" ] && tok="$(_envtok GITHUB_TOKEN)"
-  [ -n "$tok" ] && export GH_TOKEN="$tok"
+if [ -z "${GH_TOKEN:-}" ]; then
+  tok="$(envval GH_PUBLISH_TOKEN)"
+  if [ -z "$tok" ]; then tok="$(envval GITHUB_TOKEN)"; fi
+  if [ -n "$tok" ]; then export GH_TOKEN="$tok"; fi
 fi
 
 if [ ! -f "$INDEX/manifest.json" ]; then
