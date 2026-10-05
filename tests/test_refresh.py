@@ -237,6 +237,7 @@ def test_publish_token_falls_back_to_github_token(sandbox):
     r = sandbox.run()
     assert r.returncode == 0, r.stdout + r.stderr               # used to abort: exit 1, no output
     assert "package_index.sh --upload GH_TOKEN=read" in sandbox.calls()
+    assert b"GH_TOKEN=read\n" in sandbox.log.read_bytes()       # and no stray CR on it
 
 
 def test_dotenv_without_any_token_still_runs(sandbox):
@@ -271,7 +272,7 @@ def test_start_ping(sandbox):
     sandbox.dotenv(f"HEALTHCHECK_URL={URL}\n")
     r = sandbox.run("hc_ping.sh", "start")
     assert r.returncode == 0 and "sent /start" in r.stdout
-    assert sandbox.calls() == [f"curl -fsS -m 10 -o /dev/null --data-raw  {URL}/start"]
+    assert sandbox.calls() == [f"curl -gfsS -m 10 -o /dev/null --data-raw  {URL}/start"]
 
 
 def test_success_ping_carries_the_journal_tail(sandbox):
@@ -281,7 +282,7 @@ def test_success_ping_carries_the_journal_tail(sandbox):
     assert r.returncode == 0
     assert sandbox.pings() == [URL]                             # bare URL = success
     assert sorted(sandbox.calls()) == [                         # (pipeline: order varies)
-        f"curl -fsS -m 10 --retry 3 --retry-max-time 30 -o /dev/null --data-binary @- {URL}",
+        f"curl -gfsS -m 10 --retry 3 --retry-max-time 30 -o /dev/null --data-binary @- {URL}",
         f"journalctl --no-pager -q -o cat -n 200 _SYSTEMD_INVOCATION_ID={RUN_ID}"
         f" + INVOCATION_ID={RUN_ID}",                           # this run's lines only
     ]
@@ -335,9 +336,26 @@ def test_ping_body_never_contains_secrets(sandbox):
     assert "url [REDACTED]/fail abc" in body                    # short values are left alone
 
 
+def test_a_secret_cut_by_the_size_limit_is_still_scrubbed(sandbox):
+    token = "github_pat_" + "A1b2C3d4" * 8                      # fake; a .env value
+    other = "ghp_" + "E5f6G7h8" * 5                             # token-shaped, not in .env
+    sandbox.dotenv(f"GITHUB_TOKEN={token}\nHEALTHCHECK_URL={URL}\n")
+    # 7970 bytes of filler: the last 8000 bytes of the RAW journal start 30 bytes
+    # before the end of the secret line, inside the token. Truncating before
+    # scrubbing would leave a prefix-less token tail that no rule recognises.
+    filler = (("x" * 79 + "\n") * 100)[30:]
+    for line in (f"Bearer {token}\n", f"bad credentials {other}\n"):
+        sandbox.run("hc_ping.sh", "result", INVOCATION_ID=RUN_ID,
+                    FAKE_JOURNAL=line + filler)
+    body = sandbox.body()
+    for tok in (token, other):
+        assert not any(tok[i:i + 8] in body for i in range(len(tok) - 7))
+
+
 def test_ping_body_is_small_valid_utf8_and_keeps_the_end(sandbox):
     sandbox.dotenv(f"HEALTHCHECK_URL={URL}\n")
-    journal = "é–línea de registro 日本語\n" * 3000 + "FAILED: exit 1 at line 99\n"
+    journal = "日" * 4000 + "\nFAILED: exit 1 at line 99\n"
+    assert journal.encode()[-8000] & 0xC0 == 0x80               # the cut lands mid-character
     sandbox.run("hc_ping.sh", "result", INVOCATION_ID=RUN_ID, FAKE_JOURNAL=journal)
     raw = Path(f"{sandbox.log}.curl-stdin").read_bytes()
     assert len(raw) < 10_000                                    # whole in the alert e-mail

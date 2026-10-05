@@ -48,7 +48,13 @@ def test_refresh_service_pings_around_the_refresh():
 
 
 def test_no_ping_url_is_committed():
-    for path in UNITS + [DEPLOY.parent / ".env.example"]:
-        live = [v for _, _, v in _settings(path)]
-        assert not any(re.search(r"hc-ping\.com/[0-9a-f]{8}-", v) for v in live), path.name
+    root = DEPLOY.parent
+    files = (sorted(DEPLOY.iterdir()) + sorted((root / "scripts").iterdir())
+             + [root / ".env.example", root / "DEPLOY.md"])
+    # Raw text, comments included: after the host only the literal placeholder is
+    # allowed (covers UUID and <ping-key>/<slug> URLs, any letter case).
+    leak = re.compile(r"(?:hc-ping\.com|hchk\.io)/(?!<uuid>)[A-Za-z0-9]", re.I)
+    for path in files:
+        if path.is_file():
+            assert not leak.search(path.read_text(errors="replace")), path.name
     assert not any(k == "EnvironmentFile" for _, k, _ in _settings(REFRESH))  # .env stays out of the unit
