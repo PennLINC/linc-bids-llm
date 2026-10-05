@@ -1,0 +1,88 @@
+name: CI
+
+# Every branch push is tested: branches here are pushed (often by agents) long
+# before a PR exists. A pull_request run from a branch of this repo would only
+# repeat the push run on the same commit, so the jobs' `if` skips those and
+# keeps pull_request for forks.
+on:
+  push:
+    branches: ["**"]   # branches only, not tags (the index-latest release)
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  tests:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04   # the server's OS (DEPLOY.md): flock + GNU tools as the scripts meet them there
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"   # the linc-bids-llm env's python
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # test_tools.py skips without rg, and three test_refresh.py tests skip
+      # without flock (so they never run on macOS). Here a missing tool fails
+      # the job instead.
+      - name: Install ripgrep
+        run: |
+          command -v rg >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep; }
+          rg --version | head -n 1
+          flock --version
+
+      # torch arrives via sentence-transformers, and its default Linux wheel
+      # pulls in gigabytes of CUDA libraries. Take the CPU build first; the
+      # requirements install then finds torch already satisfied.
+      - name: Install dependencies
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r requirements.txt
+
+      # The tests mock the LLM client, the embedder and the UI, so nothing else
+      # shows these import against what pip just resolved (requirements.txt
+      # pins top-level packages only).
+      - name: Import the packages the tests mock
+        run: python -c "import openai, sentence_transformers, streamlit"
+
+      # Chunking loads tiktoken's cl100k_base: a 1.7 MB download on first use,
+      # and the suite's only network access.
+      - name: Cache the tiktoken encoding
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/tiktoken
+          key: tiktoken-cl100k_base
+
+      - name: Run tests
+        env:
+          TIKTOKEN_CACHE_DIR: ${{ runner.temp }}/tiktoken
+        run: python -m pytest -rs
+
+  static:
+    name: static checks
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Not a style gate: syntax errors and undefined names only. Nothing else
+      # checks app.py and probes/, which no test imports.
+      - name: Python syntax errors and undefined names
+        run: pipx run --spec ruff==0.16.10 ruff check --select E9,F63,F7,F82 .
+
+      - name: shellcheck the server scripts
+        run: shellcheck scripts/*.sh
