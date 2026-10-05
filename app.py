@@ -26,7 +26,6 @@ from src.feedback import issue_url, log_feedback, run_context
 from src.store import Store
 
 CHATS_DIR = Path(".chats")
-HISTORY_TURNS = 6  # prior messages fed to the agent for follow-up context
 
 # Problem categories for structured feedback (first entry = "no problem").
 CATEGORIES = ["— (looked good)", "wrong fix / advice", "bad or broken sources",
@@ -89,12 +88,6 @@ def render_assistant(msg: dict) -> None:
                 st.code(step["result"][:1500])
 
 
-def agent_history(messages: list[dict]) -> list[dict]:
-    """Recent turns as plain role/content items for the agent's context."""
-    return [{"role": m["role"], "content": m["content"]}
-            for m in messages[-HISTORY_TURNS:]]
-
-
 # --- feedback -----------------------------------------------------------------
 
 def feedback_block(app: str, state: dict, config: dict, manifest: dict) -> None:
@@ -134,7 +127,7 @@ def feedback_block(app: str, state: dict, config: dict, manifest: dict) -> None:
                 "turn": sum(m["role"] == "assistant" for m in messages),
                 # A follow-up's question means little alone ("and on 1.0.0?");
                 # keep the turns the agent was given so the case can be replayed.
-                "history": agent_history(messages[:-2]),
+                "history": answer_mod.agent_history(messages[:-2]),
                 "question": question,
                 "answer": answer_md,
                 "rating": {0: "down", 1: "up"}.get(rating),
@@ -285,7 +278,7 @@ if question := st.chat_input(f"Paste an error or ask about {app}…"):
                      "reached — please try again tomorrow. Ping a maintainer if "
                      "you need it raised.")
             st.stop()
-        history = agent_history(state["messages"][:-1])
+        history = answer_mod.agent_history(state["messages"][:-1])
         with st.spinner("Retrieving + answering…"):
             try:
                 msg = answer_turn(question, app, mode, config, store, history,

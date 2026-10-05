@@ -48,9 +48,11 @@ SYSTEM_AGENT = (
     "2. If it's a code question or the traceback points at source, grep_code "
     "the version the user ran to find the raising line, then read_file to read "
     "it and get a permalink.\n"
-    "3. Version awareness is core: users run old containers. If the version is "
-    "unknown and it matters, ASK for it before grepping; note when a fix landed "
-    "in a later release.\n"
+    "3. Version awareness is core: users run old containers. A version the user "
+    "gave earlier in this chat still counts (each user turn ends with a note on "
+    "what has been stated) — do not ask for it again. If the version is unknown "
+    "and it matters, ASK for it before grepping; note when a fix landed in a "
+    "later release.\n"
     f"{CITE_RULES}\n"
     "- You may reason beyond the docs — 'the docs don't cover this; based on "
     "the code at <permalink>, likely X' is in-bounds — but never invent APIs or "
@@ -137,11 +139,68 @@ class AgentResult:
     iterations: int = 0
 
 
-def _version_hint(question: str) -> str:
-    m = VERSION_HINT_RE.search(question)
-    if m:
-        return (f"The user's message mentions '{m.group(0)}', which may be the "
+HISTORY_TURNS = 6  # recent chat messages fed to the agent for follow-up context
+MAX_VERSION_MENTIONS = 4  # earlier tokens the hint lists; more reads as noise
+
+
+def agent_history(messages: list[dict]) -> list[dict]:
+    """The prior chat turns the agent sees, as plain role/content items: the
+    last HISTORY_TURNS messages, plus the opening user message once the window
+    has scrolled past it.
+
+    The opening message is where the version (and the error being chased) is
+    stated, and nothing later repeats it — so past three exchanges the window
+    alone had the agent asking for the version again. Re-sending that one
+    message costs its own length per turn, small next to the six recent turns
+    it rides with, and keeps the mention in context: the model can tell a
+    release from an output resolution, which a bare token carried forward on
+    its own could not. The app logs this with each feedback entry, so a rated
+    follow-up replays with exactly the turns the agent had."""
+    recent = messages[-HISTORY_TURNS:]
+    first = next((i for i, m in enumerate(messages) if m["role"] == "user"), None)
+    if first is not None and first < len(messages) - HISTORY_TURNS:
+        recent = [messages[first], *recent]
+    return [{"role": m["role"], "content": m["content"]} for m in recent]
+
+
+def _version_mentions(text: str) -> list[str]:
+    """Distinct version-looking tokens in `text`, in order of appearance. The
+    pattern is deliberately loose — '1.25' (an output resolution) matches too —
+    which is why every hint says the token *may* be the version."""
+    return list(dict.fromkeys(VERSION_HINT_RE.findall(text or "")))
+
+
+def _quoted(items: list[str]) -> str:
+    quoted = [f"'{v}'" for v in items]
+    if len(quoted) < 2:
+        return "".join(quoted)
+    return ", ".join(quoted[:-1]) + " and " + quoted[-1]
+
+
+def _version_hint(question: str, history: list | None = None) -> str:
+    """The note appended to the user turn so the model treats the version the
+    way a maintainer would: use the one stated anywhere in this chat, ask only
+    when none was. Earlier user turns in `history` count — a follow-up rarely
+    repeats the version given at the start of a chat, and a hint that read the
+    current message alone told the model to ask for it again on every
+    version-less follow-up (a tester's top complaint)."""
+    now = _version_mentions(question)
+    if now:
+        return (f"The user's message mentions '{now[0]}', which may be the "
                 "version — confirm before relying on it.")
+    earlier = []
+    for m in history or []:
+        if m.get("role") == "user" and isinstance(m.get("content"), str):
+            earlier.extend(_version_mentions(m["content"]))
+    earlier = list(dict.fromkeys(earlier))
+    if earlier:
+        # x.y.z tokens first: they read as releases, where x.y is as often a
+        # resolution or a count — so the cap drops the likelier false positives
+        earlier.sort(key=lambda v: v.count(".") < 2)
+        which = "which may be" if len(earlier) == 1 else "one of which may be"
+        return (f"Earlier in this chat the user mentioned "
+                f"{_quoted(earlier[:MAX_VERSION_MENTIONS])}, {which} the version "
+                "— do not ask for it again; confirm only if it is ambiguous.")
     return "The user did not state a version; ask if it matters for the answer."
 
 
@@ -179,8 +238,8 @@ def answer_agent(question: str, app: str, config: dict, store,
     model = config["llm"]["agent_model"]
 
     input_items = list(history or [])
-    input_items.append({"role": "user",
-                        "content": f"{question}\n\n({_version_hint(question)})"})
+    input_items.append({"role": "user", "content":
+                        f"{question}\n\n({_version_hint(question, history)})"})
 
     transcript: list = []
     max_iter = config["llm"]["max_tool_iterations"]

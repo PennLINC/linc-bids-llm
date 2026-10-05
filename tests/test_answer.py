@@ -96,6 +96,71 @@ def test_version_hint():
     assert "did not state a version" in answer._version_hint("why does eddy fail?")
 
 
+# A tester gave the version in their opening message and was asked for it on
+# every follow-up: the hint read the current message alone, and once the chat
+# ran past three exchanges the window no longer carried the opening message.
+
+OPENING = ("I'm running qsiprep 1.0.0rc2 via apptainer and eddy fails with "
+           "--output-resolution 1.25")
+FOLLOWUP = ("Ok explain how SynthStrip + SynthSeg together compare to FAST in "
+            "a 5TT pipeline specifically.")
+
+
+def _chat(*user_turns):
+    """A history in which the assistant answered each user turn."""
+    history = []
+    for q in user_turns:
+        history += [{"role": "user", "content": q},
+                    {"role": "assistant", "content": "Answer about that."}]
+    return history
+
+
+def test_version_hint_finds_version_given_earlier_in_the_chat():
+    hint = answer._version_hint(FOLLOWUP, history=_chat("qsiprep 1.0.0rc2 crashes"))
+    assert "Earlier in this chat" in hint and "'1.0.0rc2'" in hint
+    assert "do not ask for it again" in hint
+    assert "did not state" not in hint
+
+
+def test_version_hint_current_message_wins():
+    hint = answer._version_hint("and on 1.0.0?", history=_chat("I run qsiprep 0.21.4"))
+    assert hint.startswith("The user's message mentions '1.0.0'")
+
+
+def test_version_hint_lists_every_earlier_candidate():
+    # '1.25' is an output resolution; the hint can't know that, so it lists
+    # both and leaves the model to confirm from the turn itself
+    hint = answer._version_hint(FOLLOWUP, history=_chat(OPENING))
+    assert "'1.0.0rc2' and '1.25'" in hint
+    assert "one of which may be the version" in hint
+    assert "confirm only if it is ambiguous" in hint
+
+
+def test_version_hint_reads_user_turns_only():
+    history = [{"role": "user", "content": "eddy crashes, why?"},
+               {"role": "assistant", "content": "That was fixed in 0.22.0."}]
+    assert "did not state a version" in answer._version_hint("ok, so?", history)
+
+
+def test_version_hint_tolerates_history_shapes():
+    # no history, an empty one, and non-text content all read as no mention
+    assert "did not state" in answer._version_hint("q", None)
+    assert "did not state" in answer._version_hint("q", [])
+    parts = [{"role": "user", "content": [{"type": "input_text", "text": "1.0.0"}]}]
+    assert "did not state" in answer._version_hint("q", parts)
+
+
+def test_version_hint_caps_candidates_and_prefers_releases():
+    # an environment dump is full of x.y numbers; the x.y.z release is the one
+    # worth listing first, and the list stays short
+    history = _chat("Ubuntu 22.04, CUDA 12.1, python 3.10, numpy 1.26, 64.5 GB "
+                    "RAM, qsiprep 1.0.0")
+    hint = answer._version_hint("why?", history)
+    assert hint.count("'") == 2 * answer.MAX_VERSION_MENTIONS
+    assert hint.index("'1.0.0'") < hint.index("'22.04'")
+    assert "'64.5'" not in hint
+
+
 def test_notes_injected_into_system_prompt(config):
     # config fixture gives qsiprep a note about reconstruction being qsirecon's
     client = FakeClient([FakeMsg(content="ok")])
@@ -152,6 +217,19 @@ def test_answer_agent_hits_cap_then_forces_wrapup(config):
     assert len(result.transcript) == config["llm"]["max_tool_iterations"]
 
 
+def test_answer_agent_hint_reads_the_chat(config):
+    client = FakeRespClient([FakeResp(output_text="SynthStrip vs FAST: ...")])
+    history = _chat(OPENING)
+    answer.answer_agent(FOLLOWUP, "qsiprep", config, FakeStore(),
+                        history=history, client=client)
+    sent = client.responses.calls[0]["input"]
+    assert sent[:-1] == history                        # the chat precedes the turn
+    turn = sent[-1]
+    assert turn["role"] == "user" and turn["content"].startswith(FOLLOWUP)
+    assert "Earlier in this chat the user mentioned '1.0.0rc2'" in turn["content"]
+    assert "did not state a version" not in turn["content"]
+
+
 def test_answer_agent_tolerates_bad_tool_json(config):
     script = [
         FakeResp(output=[FakeFnCall("search_kb", "{not json")]),
@@ -161,3 +239,49 @@ def test_answer_agent_tolerates_bad_tool_json(config):
     result = answer.answer_agent("q", "qsiprep", config, FakeStore(), client=client)
     assert result.answer == "done"
     assert result.transcript[0]["args"] == {}          # bad json -> empty args
+
+
+# --- history window ------------------------------------------------------------
+# app.py sends agent_history(prior messages) to the agent and logs the same
+# with each feedback entry, so a rated follow-up replays with the turns it had.
+
+def _messages(n):
+    """A chat of n stored messages, user/assistant alternating, with the UI's
+    extra keys on them; the opening message states the version."""
+    msgs = []
+    for i in range(n):
+        role = "user" if i % 2 == 0 else "assistant"
+        msgs.append({"role": role, "content": f"{role} {i}", "route_path": "agent"})
+    msgs[0]["content"] = OPENING
+    return msgs
+
+
+def test_agent_history_short_chat_is_sent_whole():
+    assert answer.agent_history([]) == []
+    out = answer.agent_history(_messages(4))
+    assert [m["content"] for m in out] == [OPENING, "assistant 1", "user 2",
+                                           "assistant 3"]
+    assert all(set(m) == {"role", "content"} for m in out)   # UI keys stripped
+
+
+def test_agent_history_keeps_opening_message_past_the_window():
+    msgs = _messages(10)
+    out = answer.agent_history(msgs)
+    assert len(out) == answer.HISTORY_TURNS + 1
+    assert out[0] == {"role": "user", "content": OPENING}
+    assert out[1:] == [{"role": m["role"], "content": m["content"]}
+                       for m in msgs[-answer.HISTORY_TURNS:]]
+
+
+def test_agent_history_does_not_duplicate_an_opening_still_in_the_window():
+    out = answer.agent_history(_messages(answer.HISTORY_TURNS))
+    assert len(out) == answer.HISTORY_TURNS
+    assert [m["content"] for m in out].count(OPENING) == 1
+
+
+def test_version_survives_a_long_chat():
+    # the tester's chat: version in the opening message, a follow-up four
+    # exchanges later. The window keeps the opening turn and the hint reads it.
+    history = answer.agent_history(_messages(8))
+    hint = answer._version_hint(FOLLOWUP, history)
+    assert "'1.0.0rc2'" in hint and "do not ask for it again" in hint
