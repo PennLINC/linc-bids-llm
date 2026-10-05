@@ -107,6 +107,10 @@ def feedback_block(app: str, state: dict, config: dict, manifest: dict) -> None:
     key = f"{app}::{state['id']}::{len(messages)}"
 
     with st.expander("Rate this answer / report a problem"):
+        # The thumb is the field everything downstream keys on, and the one
+        # testers skipped (it has no label of its own) — so it is asked for by
+        # name here and gates the button below.
+        st.caption("Was this answer good? Pick 👍 or 👎 to rate it.")
         rating = st.feedback("thumbs", key=f"rate::{key}")
         category = st.selectbox(
             "If it wasn't good, what was wrong?", CATEGORIES, key=f"cat::{key}")
@@ -116,7 +120,8 @@ def feedback_block(app: str, state: dict, config: dict, manifest: dict) -> None:
             help="Lets this case become a retrieval regression test.")
         comment = st.text_input(
             "What was wrong, or what should it have said?", key=f"comm::{key}")
-        if st.button("Log feedback", key=f"log::{key}"):
+        if st.button("Log feedback", key=f"log::{key}", disabled=rating is None,
+                     help="Pick 👍 or 👎 first." if rating is None else None):
             log_feedback({
                 "app": app,
                 "path": path,

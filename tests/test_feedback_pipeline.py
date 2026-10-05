@@ -150,6 +150,18 @@ def test_prepare_counts_a_category_without_a_thumb_as_down():
     assert len(entries_to_cases(entries)) == 1               # and promoted
 
 
+def test_prepare_counts_an_untouched_form_as_up():
+    # logged with every field at its default: the category reads "looked good"
+    entries = prepare([
+        {"rating": None, "category": None, "correct_url": None, "comment": "",
+         "question": "q1", "answer": "a"},
+        {"rating": "up", "question": "q2", "answer": "a"},     # a real thumb
+    ])
+    s = summarize(entries)
+    assert s["up"] == 2 and s["implied_up"] == 1 and s["down"] == 0
+    assert not s["notes"] and not entries_to_cases(entries)
+
+
 def test_merge_cases_dedupes_and_updates():
     old = [{"case_id": "x", "created": "1", "reference": "old"},
            {"case_id": "y", "created": "2"}]

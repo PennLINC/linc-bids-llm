@@ -70,8 +70,10 @@ python -m eval.run_eval --heldout eval/regression.json --answers 10   # + judged
 ```
 
 (`--local` adds your own log instead of / as well as `--log`.) The report
-keeps one entry per rated answer (a re-click supersedes the earlier one) and
-counts a problem category with no thumb as a thumbs-down. The retrieval step
+keeps one entry per rated answer (a re-click supersedes the earlier one). The
+app won't log without a thumb, but entries from before it required one are
+read by what the form said: a problem category with no thumb counts as a
+thumbs-down, a form left entirely at its defaults as a thumbs-up. The retrieval step
 lists every miss with its cause — the correct URL isn't indexed at all, it's
 filed under an app outside the card's scope, or it's indexed but ranked too
 low; only the last is a ranking problem. The judged step calls the OpenAI API,

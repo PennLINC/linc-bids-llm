@@ -47,12 +47,18 @@ def prepare(entries: list[dict]) -> list[dict]:
       the first.
     - No thumb but a problem category picked is a thumbs-down in all but name;
       it is counted as one (marked `implied`) instead of silently dropped.
+    - No thumb and nothing else touched is a thumbs-up by the same token: the
+      form's default category reads "looked good". (Both predate the app
+      requiring a thumb before it will log.)
     """
     latest: dict = {}
     for i, e in enumerate(entries):
         e = dict(e)
-        if e.get("rating") is None and e.get("category"):
-            e["rating"], e["implied"] = "down", True
+        if e.get("rating") is None:
+            if e.get("category"):
+                e["rating"], e["implied"] = "down", True
+            elif not (e.get("comment") or e.get("correct_url")):
+                e["rating"], e["implied"] = "up", True
         if e.get("chat_id"):        # pins the exact answer, per tester session
             key = (e.get("session"), e["chat_id"], e.get("turn"))
         elif e.get("question") and e.get("answer"):   # entries before chat_id
@@ -115,6 +121,8 @@ def summarize(entries: list[dict]) -> dict:
     return {
         "total": total, "up": up, "down": down,
         "implied": sum(1 for e in failures if e.get("implied")),
+        "implied_up": sum(1 for e in entries
+                          if e.get("implied") and e.get("rating") == "up"),
         "by_app": by_app, "by_path": by_path, "by_model": by_model,
         "by_category": by_category, "failures": failures, "notes": notes,
     }
@@ -159,6 +167,9 @@ def main():
     if s["implied"]:
         print(f"  ({s['implied']} of the downs had no thumb, only a problem "
               "category — counted as down)")
+    if s["implied_up"]:
+        print(f"  ({s['implied_up']} of the ups had no thumb and nothing else "
+              "filled in — counted as up)")
     print("  by app:")
     for a, v in sorted(s["by_app"].items()):
         r = v["up"] + v["down"]
