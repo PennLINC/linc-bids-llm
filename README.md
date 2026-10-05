@@ -29,10 +29,13 @@ cp .env.example .env                 # set GITHUB_TOKEN (harvest), OPENAI_API_KE
 pytest        # ~15 s; needs no API keys, config.yaml, index or checkouts
 ```
 
-HTTP and the LLM are mocked. The tests that need `rg` or `flock` skip where the
-tool is missing (`flock`: always on macOS). [CI](.github/workflows/ci.yml) runs
-the full suite on every push, on the server's setup (Ubuntu 24.04, Python 3.12),
-plus `shellcheck` on `scripts/` and a syntax / undefined-name check on all Python.
+HTTP and the LLM are mocked; the only network access is tiktoken downloading
+its 1.7 MB `cl100k_base` encoding when that is not already in its cache. The
+tests that need `rg` or `flock` skip where the tool is missing (`flock`: always
+on macOS). [CI](.github/workflows/ci.yml) runs the full suite on every push and
+PR, on the server's OS and Python version (Ubuntu 24.04, Python 3.12) with
+CPU-only torch, plus `shellcheck` on `scripts/` and a syntax / undefined-name
+check on all Python.
 
 ## Hosted preview
 

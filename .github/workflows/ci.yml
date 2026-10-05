@@ -1,9 +1,9 @@
 name: CI
 
-# Every branch push is tested: branches here are pushed (often by agents) long
-# before a PR exists. A pull_request run from a branch of this repo would only
-# repeat the push run on the same commit, so the jobs' `if` skips those and
-# keeps pull_request for forks.
+# Every branch push is tested: branches here are pushed (often by agents)
+# before a PR exists. pull_request also runs for every PR: it tests the merge
+# with main (the push run tests the branch tip only), and it is the only run
+# for fork PRs and for branches cut before this file reached main.
 on:
   push:
     branches: ["**"]   # branches only, not tags (the index-latest release)
@@ -13,13 +13,14 @@ on:
 permissions:
   contents: read
 
+# A newer push to a branch or PR cancels the run it supersedes. Runs on main
+# each get their own group, so none waits for, or is replaced by, a later merge.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   tests:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-24.04   # the server's OS (DEPLOY.md): flock + GNU tools as the scripts meet them there
     timeout-minutes: 20
     steps:
@@ -34,35 +35,51 @@ jobs:
           cache-dependency-path: requirements.txt
 
       # test_tools.py skips without rg, and three test_refresh.py tests skip
-      # without flock (so they never run on macOS). Here a missing tool fails
-      # the job instead.
+      # without /usr/bin/flock (so they never run on macOS). Here a missing
+      # tool fails the job instead.
       - name: Install ripgrep
         run: |
-          command -v rg >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep; }
-          rg --version | head -n 1
-          flock --version
+          if ! command -v rg >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ripgrep
+          fi
+          rg --version
+          /usr/bin/flock --version
 
       # torch arrives via sentence-transformers, and its default Linux wheel
-      # pulls in gigabytes of CUDA libraries. Take the CPU build first; the
-      # requirements install then finds torch already satisfied.
+      # pulls in gigabytes of CUDA libraries. Take only the CPU build from
+      # PyTorch's index (--no-deps: its copies of other packages lag PyPI);
+      # the requirements install then finds torch satisfied and resolves
+      # torch's own dependencies from PyPI like everything else.
       - name: Install dependencies
         run: |
-          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install --no-deps torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -r requirements.txt
+          python -m pip check
 
-      # The tests mock the LLM client, the embedder and the UI, so nothing else
-      # shows these import against what pip just resolved (requirements.txt
-      # pins top-level packages only).
-      - name: Import the packages the tests mock
-        run: python -c "import openai, sentence_transformers, streamlit"
+      # The tests fake the LLM client and the embedder and never load the UI
+      # (app.py), so nothing else shows these import against what pip just
+      # resolved (requirements.txt pins top-level packages only).
+      - name: Import the packages the tests never load
+        run: |
+          python -c "import openai, sentence_transformers, streamlit"
+          # the CPU build must have survived the requirements install
+          python -c "import torch; assert torch.__version__.endswith('+cpu'), torch.__version__"
 
-      # Chunking loads tiktoken's cl100k_base: a 1.7 MB download on first use,
-      # and the suite's only network access.
+      # Chunking loads tiktoken's cl100k_base: a 1.7 MB download, and the
+      # suite's only network access. Cache it, and on a miss fetch it here so
+      # that a failed download fails this step, not whichever test tokenizes
+      # first.
       - name: Cache the tiktoken encoding
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/tiktoken
           key: tiktoken-cl100k_base
+
+      - name: Fetch the tiktoken encoding (a no-op on a cache hit)
+        env:
+          TIKTOKEN_CACHE_DIR: ${{ runner.temp }}/tiktoken
+        run: python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 
       - name: Run tests
         env:
@@ -71,7 +88,6 @@ jobs:
 
   static:
     name: static checks
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -84,5 +100,7 @@ jobs:
       - name: Python syntax errors and undefined names
         run: pipx run --spec ruff==0.16.10 ruff check --select E9,F63,F7,F82 .
 
+      # Pinned like ruff: the runner image's own shellcheck is 0.9.0, whose
+      # default checks differ from the current release's in both directions.
       - name: shellcheck the server scripts
-        run: shellcheck scripts/*.sh
+        run: pipx run --spec shellcheck-py==0.11.0.1 shellcheck scripts/*.sh
