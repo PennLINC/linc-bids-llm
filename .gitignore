@@ -23,3 +23,6 @@ checkouts/
 
 # Build artifacts (index tarball for release upload)
 dist/
+
+# flock lock shared by refresh.sh / deploy.sh / fetch_index.sh
+.refresh.lock

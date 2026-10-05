@@ -16,9 +16,18 @@
 #         failed (SKIP_PUBLISH=1 turns publishing off)
 #   else  the run died earlier — normally before the swap, live index untouched
 #
+# One run at a time: refresh.sh, deploy.sh and fetch_index.sh all take the same
+# lock (.refresh.lock at the repo root, via flock) because two of them at once
+# wreck index/ — a second refresh deletes the first one's staging dir and the
+# first then fails its swap with no live index left; a deploy pip-installs
+# under a running ingest. systemd only de-duplicates its own starts, not a
+# hand-run script. Without flock (macOS) the scripts run unlocked.
+#
 # Env knobs (all optional):
 #   ENV_PY   path to the env python   (default: ~/miniforge3/envs/linc-bids-llm/bin/python)
 #   SERVICE  systemd service to restart (default: bids-assistant)
+#   LOCK_WAIT  seconds to wait for a running refresh/deploy before giving up
+#              with exit 75 (default: 600)
 #   SKIP_CHECKOUTS=1  skip the checkout update (faster; for testing)
 #   SKIP_RESTART=1    don't restart the service (auto-skipped when systemctl absent)
 #   SKIP_PUBLISH=1    don't re-publish the index release asset
@@ -38,6 +47,21 @@ log() { echo "[refresh $(date -u +%FT%TZ)] $*"; }
 # No failure may be silent: say where the run died (the tail of this log is
 # what the healthcheck alert e-mail shows).
 trap 'log "FAILED: exit $? at line $LINENO"' ERR
+
+# Take the lock first, before even looking at index/ (a concurrent run may be
+# mid-swap). The lock lives on fd 9 for the rest of the run; a leftover
+# .refresh.lock file is harmless (flock locks the open file, not its presence).
+if command -v flock >/dev/null 2>&1; then
+  exec 9>.refresh.lock
+  if ! flock -n 9; then
+    log "another refresh/deploy is running (holds .refresh.lock); waiting up to ${LOCK_WAIT:-600}s..."
+    if ! flock -w "${LOCK_WAIT:-600}" 9; then
+      log "still locked after ${LOCK_WAIT:-600}s; giving up without touching anything (exit 75)."
+      exit 75
+    fi
+    log "lock acquired."
+  fi
+fi
 
 # One KEY=value from .env. Prints nothing — and still succeeds — when the key or
 # the file is missing (a bare `grep | cut` aborts the script under pipefail).

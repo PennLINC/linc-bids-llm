@@ -7,10 +7,23 @@
 # Uses `gh` when available (needed for a private repo). On a PUBLIC repo it
 # falls back to a plain curl of the release asset — so a server with no `gh`
 # still works. An existing index/ is moved aside to index.bak.<timestamp>.
+#
+# Shares .refresh.lock with refresh.sh and deploy.sh (one of them at a time may
+# touch index/). Taken non-blocking: if a refresh or deploy is running this
+# exits 75 without touching anything. deploy.sh calls this with the lock
+# already held and says so with REFRESH_LOCK_HELD=1. No flock (macOS): unlocked.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 TAG="${1:-index-latest}"
+
+if [ "${REFRESH_LOCK_HELD:-}" != "1" ] && command -v flock >/dev/null 2>&1; then
+  exec 9>.refresh.lock
+  if ! flock -n 9; then
+    echo "error: a refresh or deploy is running (holds .refresh.lock) — wait for it, then retry" >&2
+    exit 75
+  fi
+fi
 
 # Resolve GitHub CLI explicitly (a bare `gh` can be shadowed on PATH). Real
 # GitHub CLI prints a github.com/cli/cli URL in --version. Override with GH=.
