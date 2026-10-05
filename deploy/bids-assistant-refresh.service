@@ -1,5 +1,6 @@
 # Oneshot service that runs the nightly refresh (checkouts + index). Triggered
-# by bids-assistant-refresh.timer, not enabled directly. Install both:
+# by bids-assistant-refresh.timer, not enabled directly. Install both — and
+# re-install after every change to either file:
 #   sudo cp deploy/bids-assistant-refresh.{service,timer} /etc/systemd/system/
 #   sudo systemctl daemon-reload && sudo systemctl enable --now bids-assistant-refresh.timer
 #
@@ -22,8 +23,21 @@ Environment=OMP_NUM_THREADS=1
 Environment=MKL_NUM_THREADS=1
 Environment=OPENBLAS_NUM_THREADS=1
 Environment=TOKENIZERS_PARALLELISM=false
+# Unbuffered python output, so the journal (and the log tail sent with a failure
+# alert) shows how far a run got when it is killed.
+Environment=PYTHONUNBUFFERED=1
+# Monitoring via healthchecks.io (optional: both hooks do nothing until
+# HEALTHCHECK_URL is in .env — the URL is a secret and never belongs in this
+# file; setup in DEPLOY.md). The pings are sent from here, not from refresh.sh:
+# ExecStopPost runs however the run ended (non-zero exit, start timeout, OOM
+# kill) and is handed the outcome in $SERVICE_RESULT / $EXIT_STATUS. The leading
+# "-" makes systemd ignore the helper's exit status and the helper bounds
+# itself, so ping trouble can neither fail nor stall the refresh.
+ExecStartPre=-/home/ubuntu/linc-bids-llm/scripts/hc_ping.sh start
 ExecStart=/home/ubuntu/linc-bids-llm/scripts/refresh.sh
-# Refresh does a full harvest of any new/changed content; give it room.
+ExecStopPost=-/home/ubuntu/linc-bids-llm/scripts/hc_ping.sh result
+# Refresh does a full harvest of any new/changed content; give it room. (The
+# healthchecks.io grace time is derived from this: jitter + this + margin.)
 TimeoutStartSec=3600
 # Be a well-behaved background job: yield CPU and disk to the live app, and —
 # critically on a memory-tight box — make the kernel's OOM killer prefer THIS

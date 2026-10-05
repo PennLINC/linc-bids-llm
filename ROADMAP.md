@@ -128,13 +128,21 @@ into a **staging dir** (`BIDS_INDEX_PATH` override), validates it (non-empty),
 **swaps it in atomically**, and restarts the service so the app reopens it.
 Incremental is cheap (only changed threads), so nightly is fine even on 2 GB.
 Requires a **`GITHUB_TOKEN`** in the server `.env` and a scoped sudoers rule for
-the restart. Never ingests in place — the live app holds Chroma/SQLite open, and
-a validated staging build only replaces the live index if the ingest succeeds
-(a failed run leaves the live index untouched). Setup steps: DEPLOY.md §7.
+the restart and, optionally, a `HEALTHCHECK_URL` for monitoring. Never ingests in
+place — the live app holds Chroma/SQLite open, and a validated staging build
+only replaces the live index if the ingest succeeds (a failed run leaves the
+live index untouched). Setup steps: DEPLOY.md §7.
 
 Verified locally: a refresh caught real drift (22 changed qsiprep issues since
 the prior build), staged + validated 11.8k chunks, swapped cleanly with no
 leftover dirs, and the store reopened the new index.
+
+Monitored (2026-10): the unit pings healthchecks.io from
+`ExecStartPre`/`ExecStopPost` (`scripts/hc_ping.sh`), so timeouts and OOM kills
+are reported as well as non-zero exits; a missed night is caught by the check's
+schedule. Fixed at the same time: `Persistent=`/`RandomizedDelaySec=` in the
+timer carried trailing comments and had been ignored by systemd since install.
+Setup: DEPLOY.md §7.
 
 The alternative (**Model B** — build elsewhere + server pulls the release asset)
 stays available as the manual fallback. Under Model A the **GitHub release asset

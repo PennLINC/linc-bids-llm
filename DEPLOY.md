@@ -25,6 +25,8 @@ Rationale, cost analysis, the EC2 alternative, and the index-refresh plan are in
 - [ ] **A test question answers in the browser** (not just the CLI) —
       confirms the Streamlit websocket works through Caddy.
 - [ ] **`.feedback/` is being backed up** (see the bottom section).
+- [ ] **The nightly refresh is monitored** (§7) — otherwise an expired GitHub
+      token silently freezes the corpus.
 - [ ] **Before going fully public:** add a per-client rate limit so one script
       can't drain the daily budget in minutes (ROADMAP §2). Not needed for a
       password-gated colleague round.
@@ -138,6 +140,16 @@ are soft/email-only), so the app's ceiling is the only hard stop:
 scripts/deploy.sh                 # git pull + deps + restart service
 ```
 
+`deploy.sh` does not install systemd units. After a pull that changes anything
+in `deploy/`, re-install them:
+
+```bash
+sudo cp deploy/bids-assistant-refresh.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart bids-assistant-refresh.timer
+systemd-analyze verify /etc/systemd/system/bids-assistant-refresh.{service,timer}   # prints nothing when clean
+```
+
 ## 7. Refreshing the index + checkouts
 
 **Automatic (recommended) — the server self-refreshes nightly.** A `systemd`
@@ -159,15 +171,58 @@ echo 'ubuntu ALL=(root) NOPASSWD: /usr/bin/systemctl restart bids-assistant' \
 sudo cp deploy/bids-assistant-refresh.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now bids-assistant-refresh.timer
-sudo systemctl start  bids-assistant-refresh.service   # run once now (optional)
+sudo systemctl start --no-block bids-assistant-refresh.service   # run once now (optional)
 
 systemctl list-timers bids-assistant-refresh.timer     # confirm it's scheduled
+systemctl is-enabled bids-assistant-refresh.timer                 # "enabled" = survives reboots
+systemctl show bids-assistant-refresh.timer -p Persistent -p RandomizedDelayUSec   # expect yes / 10min
 journalctl -u bids-assistant-refresh.service -n 40     # read the last run's log
 ```
 
-Adjust the cadence in the `.timer` (`OnCalendar=`); nightly is cheap since ingest
-is incremental. Runs are logged to the journal. A failed refresh leaves the live
-index untouched (it only swaps a validated staging build).
+The timer fires at 03:30 UTC plus up to 10 min of jitter, and catches up at the
+next boot if the box was off at that time. Adjust the cadence in the `.timer`
+(`OnCalendar=`); nightly is cheap since ingest is incremental. Runs are logged
+to the journal. A failed refresh leaves the live index untouched (it only swaps
+a validated staging build).
+
+**Monitoring — an e-mail when the nightly refresh fails or stops running.**
+Optional; inert until configured. The unit reports every run to
+[healthchecks.io](https://healthchecks.io) (free plan) through
+`scripts/hc_ping.sh`: a start ping, then the outcome with the tail of that run's
+journal (values from `.env` and token-shaped strings are redacted before it
+leaves the box). A failed step, a timeout or an OOM kill alerts at once; a run
+that never happens (timer off, box down) alerts when no ping arrives in time.
+Two limits: only runs started through systemd are reported (a hand-run
+`scripts/refresh.sh` is not), and an asset-publish failure is still only a
+`WARNING` in the log and is reported as a success.
+
+1. **Create the check** at healthchecks.io: schedule **Cron** `30 3 * * *`, time
+   zone **UTC** (it mirrors the timer's `OnCalendar=`; change both together),
+   grace time **1 h 30 min** (10 min jitter + the 60 min `TimeoutStartSec` +
+   margin). Turn the e-mail integration on (press its **Test** button), and
+   under *Account → Email Reports* ask for daily reminders while a check is down.
+2. **Give the server the ping URL.** It is a secret — whoever holds it can ping
+   the check — so it lives only in `.env`, never in the unit file:
+
+   ```bash
+   printf 'HEALTHCHECK_URL=https://hc-ping.com/<uuid>\n' >> .env && chmod 600 .env
+   ```
+
+3. **Install the updated units** (§6), then prove it end to end:
+
+   ```bash
+   sudo systemctl start --no-block bids-assistant-refresh.service
+   journalctl -fu bids-assistant-refresh.service   # until "[hc_ping] sent / (success)"
+   ```
+
+   The check's **Events** list should now show a start, then a success with the
+   log as its body. The ping URL answers 200 even for a wrong UUID, so Events is
+   the only proof the URL is right.
+
+To test the alert e-mail without breaking anything, `scripts/hc_ping.sh result`
+sends a failure and
+`SERVICE_RESULT=success EXIT_CODE=exited EXIT_STATUS=0 scripts/hc_ping.sh result`
+sends the recovery. To stop monitoring, delete the `HEALTHCHECK_URL` line.
 
 **About the asset re-publish + the two tokens.** Harvesting and publishing use
 different tokens, because publishing needs write access and harvesting doesn't:
