@@ -1,6 +1,10 @@
 """Tests for the eval scoring logic (pure functions; no network)."""
-from eval.run_eval import (JUDGE_SYS, JUDGE_SYS_FEEDBACK, _reciprocal_rank, _urls,
-                           explain_miss, judge_messages, retrieval_scores)
+import json
+from types import SimpleNamespace
+
+from eval.run_eval import (ANSWER_CHARS, JUDGE_RUNS, JUDGE_SYS, JUDGE_SYS_FEEDBACK,
+                           _clip, _reciprocal_rank, _urls, explain_miss,
+                           judge_answer, judge_messages, retrieval_scores)
 from eval.harvest_eval import _stratified_sample
 from eval.urls import canon_url
 
@@ -176,3 +180,64 @@ def test_answer_scores_routes_a_followup_case_with_its_history(monkeypatch):
     assert seen["history"] == history
     assert out["by_path"] == {"agent": {"n": 1, "pass_rate": 1.0}}
     assert out["details"][0]["path"] == "agent"
+
+
+def test_judge_reads_the_end_of_a_long_answer_and_the_earlier_chat():
+    # the offending line of a long agent answer is often its last
+    ending = "If you tell me your version I can be more specific."
+    long_answer = "Background. " * 400 + ending              # well past 2.5k chars
+    fb = {"source": "feedback", "query": "and compared to FAST?",
+          "reference": "I gave the version at the start; it keeps asking",
+          "flagged_answer": long_answer,
+          "history": [{"role": "user", "content": "I'm on qsiprep 1.0.1 ..."},
+                      {"role": "assistant", "content": "On 1.0.1 ..."}]}
+    user = judge_messages(fb, long_answer)[1]["content"]
+    assert user.count(ending) == 2                            # flagged + candidate
+    assert "I'm on qsiprep 1.0.1" in user                     # the chat it was asked in
+    assert user.index("I'm on qsiprep 1.0.1") < user.index("and compared to FAST?")
+    heldout = {"source": "issues", "query": "q", "reference": "r"}
+    assert ending in judge_messages(heldout, long_answer)[1]["content"]
+
+
+def test_clip_keeps_head_and_tail():
+    assert _clip("short", 100) == "short"
+    text = "HEAD" + "x" * (2 * ANSWER_CHARS) + "TAIL"
+    clipped = _clip(text, ANSWER_CHARS)
+    assert clipped.startswith("HEAD") and clipped.endswith("TAIL")
+    assert "characters omitted" in clipped and len(clipped) < len(text)
+
+
+class FakeJudge:
+    """Stands in for the OpenAI client: replays a fixed run of verdicts."""
+    def __init__(self, *contents):
+        self.contents = list(contents)
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def _create(self, **kwargs):
+        message = SimpleNamespace(content=self.contents.pop(0))
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
+def _verdict(verdict, reason="r"):
+    return json.dumps({"verdict": verdict, "reason": reason})
+
+
+def test_judge_passes_only_when_every_run_passes():
+    case = {"source": "feedback", "query": "q", "reference": "note"}
+    config = {"llm": {"oneshot_model": "m"}}
+    rest = [_verdict("pass")] * (JUDGE_RUNS - 2)
+
+    unanimous = FakeJudge(_verdict("pass", "fixed"), _verdict("pass"), *rest)
+    assert judge_answer(case, "cand", config, unanimous) == {
+        "verdict": "pass", "reason": "fixed"}
+
+    split = FakeJudge(_verdict("pass"), _verdict("fail", "still ignores it"), *rest)
+    out = judge_answer(case, "cand", config, split)
+    assert out["verdict"] == "fail"                          # a coin flip isn't a pass
+    assert out["reason"] == (f"[judge split: {JUDGE_RUNS - 1} of {JUDGE_RUNS} runs "
+                             "passed] still ignores it")
+
+    clear = FakeJudge(_verdict("fail", "same answer"), "not json",
+                      *[_verdict("fail")] * (JUDGE_RUNS - 2))
+    assert judge_answer(case, "cand", config, clear) == {
+        "verdict": "fail", "reason": "same answer"}          # no split label

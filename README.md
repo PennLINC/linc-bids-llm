@@ -133,6 +133,18 @@ longer apply. Before trusting it as a gate, judge for "correct and actionable"
 rather than "matches the historical action", or curate timeless cases. The
 retrieval eval above is the reliable regression gate for now.
 
+Feedback cases (`--heldout eval/regression.json`) are judged on a different
+question: does the new answer fix what the tester's note says was wrong? The
+judge sees the note, the flagged answer, the new answer in full, and the chat
+the turn was asked in. Each case is judged five times and passes only if every
+run does; a disagreement is failed and marked `[judge split: …]`, which means
+"read this case yourself", not "regressed". First run on real feedback
+(2026-10-05): dependable when the note is specific — it consistently failed
+replayed answers that repeated the flagged problem, and passed the answer the
+same tester went on to accept — and when the case carries its chat. With a
+vague note ("continuing to ignore clarification") or a follow-up logged without
+its history, verdicts wobble, usually as a split. About 2¢ per case on that run.
+
 ### On `changes.md`
 
 The qsiprep changelog is 88 of 146 docs chunks (60%). Measured, it is not noise
