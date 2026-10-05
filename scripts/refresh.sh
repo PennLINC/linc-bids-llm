@@ -11,6 +11,10 @@
 # Monitoring: this script never pings anything. Its exit status is the contract;
 # the systemd unit reports it to healthchecks.io through scripts/hc_ping.sh
 # (which also covers what a script cannot report about itself: timeouts, kills).
+#   0     every step worked
+#   3     the new index is live, but the app restart and/or the asset publish
+#         failed (SKIP_PUBLISH=1 turns publishing off)
+#   else  the run died earlier — normally before the swap, live index untouched
 #
 # Env knobs (all optional):
 #   ENV_PY   path to the env python   (default: ~/miniforge3/envs/linc-bids-llm/bin/python)
@@ -88,25 +92,53 @@ mv "$INDEX" "$PREV"
 mv "$STAGING" "$INDEX"
 rm -rf "$PREV"
 
-# 5. restart so the app reopens the new index (its handles point at the old one).
+# From here on the new index is live, so a failing step no longer stops the
+# run: finish the other steps, then exit 3 so the failure is still reported.
+problems=""
+
+# 5. build the release tarball NOW, while nothing has the new index open. Once
+#    restarted, the app rewrites chroma.sqlite3 as soon as a session connects,
+#    and GNU tar counts a file that changes under it as a failure.
+tarball=""
+if [ "${SKIP_PUBLISH:-}" != "1" ]; then
+  log "packaging index tarball..."
+  if scripts/package_index.sh; then
+    tarball=1
+  else
+    log "ERROR: packaging the index tarball failed; nothing to publish."
+    problems="$problems package"
+  fi
+fi
+
+# 6. restart so the app reopens the new index (its handles point at the old one).
 if [ "${SKIP_RESTART:-}" != "1" ] && command -v systemctl >/dev/null 2>&1; then
   log "restarting $SERVICE..."
-  sudo systemctl restart "$SERVICE"
+  if ! sudo systemctl restart "$SERVICE"; then
+    log "ERROR: restarting $SERVICE failed — the app still serves the old index, or"
+    log "       is down. Fix by hand: sudo systemctl restart $SERVICE"
+    problems="$problems restart"
+  fi
 else
   log "skipping service restart (SKIP_RESTART set or systemctl absent)."
 fi
 
-# 6. re-publish the release asset (backup + up-to-date index for local dev).
-#    Non-fatal: the live index is already swapped in; a publish failure (no gh,
-#    unauthenticated, or a read-only token) only means the downloadable copy lags.
-if [ "${SKIP_PUBLISH:-}" != "1" ]; then
+# 7. re-publish the release asset (backup + up-to-date index for local dev).
+#    It cannot undo the refresh — the live index is already swapped in — but a
+#    failure is reported (exit 3): an expired GH_PUBLISH_TOKEN would otherwise
+#    leave the downloadable copy stale with nobody told. Opt out: SKIP_PUBLISH=1.
+if [ -n "$tarball" ]; then
   log "publishing index asset..."
-  if scripts/package_index.sh --upload; then
+  if scripts/package_index.sh --upload-only; then
     log "asset published."
   else
-    log "WARNING: asset publish failed (gh missing / unauthenticated / read-only"
-    log "         token). The live index is current regardless; skipping."
+    log "ERROR: asset publish failed (gh missing / unauthenticated / read-only or"
+    log "       expired token / network). The live index is current regardless."
+    problems="$problems publish"
   fi
 fi
 
+if [ -n "$problems" ]; then
+  log "FAILED after the swap:$problems. The new index is in place; see ERROR above."
+  exit 3
+fi
 log "done."

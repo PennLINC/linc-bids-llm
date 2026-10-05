@@ -130,8 +130,9 @@ Incremental is cheap (only changed threads), so nightly is fine even on 2 GB.
 Requires a **`GITHUB_TOKEN`** in the server `.env` and a scoped sudoers rule for
 the restart and, optionally, a `HEALTHCHECK_URL` for monitoring. Never ingests in
 place — the live app holds Chroma/SQLite open, and a validated staging build
-only replaces the live index if the ingest succeeds (a failed run leaves the
-live index untouched). Setup steps: DEPLOY.md §7.
+only replaces the live index if the ingest succeeds (a run that fails before
+the swap leaves the live index untouched; a failed restart or asset publish
+after it is reported as a failed run, exit 3). Setup steps: DEPLOY.md §7.
 
 Verified locally: a refresh caught real drift (22 changed qsiprep issues since
 the prior build), staged + validated 11.8k chunks, swapped cleanly with no
