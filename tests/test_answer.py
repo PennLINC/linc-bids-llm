@@ -265,7 +265,7 @@ def test_agent_history_short_chat_is_sent_whole():
 
 
 def test_agent_history_keeps_opening_message_past_the_window():
-    msgs = _messages(10)
+    msgs = _messages(answer.HISTORY_TURNS + 4)   # two exchanges past the window
     out = answer.agent_history(msgs)
     assert len(out) == answer.HISTORY_TURNS + 1
     assert out[0] == {"role": "user", "content": OPENING}
@@ -280,8 +280,9 @@ def test_agent_history_does_not_duplicate_an_opening_still_in_the_window():
 
 
 def test_version_survives_a_long_chat():
-    # the tester's chat: version in the opening message, a follow-up four
-    # exchanges later. The window keeps the opening turn and the hint reads it.
-    history = answer.agent_history(_messages(8))
+    # the tester's chat: version in the opening message, a follow-up several
+    # exchanges past the window. The window keeps the opening turn and the
+    # hint reads it.
+    history = answer.agent_history(_messages(answer.HISTORY_TURNS + 2))
     hint = answer._version_hint(FOLLOWUP, history)
     assert "'1.0.0rc2'" in hint and "do not ask for it again" in hint

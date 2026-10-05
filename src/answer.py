@@ -139,7 +139,7 @@ class AgentResult:
     iterations: int = 0
 
 
-HISTORY_TURNS = 6  # recent chat messages fed to the agent for follow-up context
+HISTORY_TURNS = 12  # recent chat messages fed to the agent for follow-up context
 MAX_VERSION_MENTIONS = 4  # earlier tokens the hint lists; more reads as noise
 
 
@@ -149,13 +149,18 @@ def agent_history(messages: list[dict]) -> list[dict]:
     has scrolled past it.
 
     The opening message is where the version (and the error being chased) is
-    stated, and nothing later repeats it — so past three exchanges the window
-    alone had the agent asking for the version again. Re-sending that one
-    message costs its own length per turn, small next to the six recent turns
-    it rides with, and keeps the mention in context: the model can tell a
-    release from an output resolution, which a bare token carried forward on
-    its own could not. The app logs this with each feedback entry, so a rated
-    follow-up replays with exactly the turns the agent had."""
+    stated, and nothing later repeats it — so once the window scrolled past it
+    the agent asked for the version again. Re-sending that one message costs
+    its own length per turn, small next to the recent turns it rides with, and
+    keeps the mention in context: the model can tell a release from an output
+    resolution, which a bare token carried forward on its own could not. The
+    app logs this with each feedback entry, so a rated follow-up replays with
+    exactly the turns the agent had.
+
+    The window size is a cost/noise knob, not a hard limit: only the turns'
+    text is sent (tool transcripts are not), and each turn re-bills it once per
+    tool iteration via previous_response_id. Message length (pasted tracebacks,
+    long answers) drives that cost more than the count does."""
     recent = messages[-HISTORY_TURNS:]
     first = next((i for i, m in enumerate(messages) if m["role"] == "user"), None)
     if first is not None and first < len(messages) - HISTORY_TURNS:
