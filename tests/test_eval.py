@@ -139,3 +139,40 @@ def test_judge_frames_feedback_notes_differently_from_resolutions():
     assert system["content"] == JUDGE_SYS_FEEDBACK
     for part in ("it invented a flag", "use --fix-fa", "hallucination", "cand"):
         assert part in user["content"]
+
+
+def test_answer_scores_routes_a_followup_case_with_its_history(monkeypatch):
+    """A replayed follow-up must reach route() with the chat it was asked in,
+    so it takes the same (agent) path it took in the app. No LLM is called."""
+    import eval.run_eval as run_eval
+    from src.router import Decision
+
+    seen = {}
+
+    def fake_route(question, store, config, app, history=None):
+        seen["history"] = history
+        return Decision("agent", [], "follow-up turn; needs chat context")
+
+    class Result:
+        answer = "agent answer"
+
+    monkeypatch.setattr(run_eval.router_mod, "route", fake_route)
+    monkeypatch.setattr(run_eval.answer_mod, "_client", lambda: object())
+    monkeypatch.setattr(run_eval.answer_mod, "answer_agent",
+                        lambda *a, **kw: Result())
+    monkeypatch.setattr(run_eval.answer_mod, "answer_oneshot",
+                        lambda *a, **kw: (_ for _ in ()).throw(
+                            AssertionError("one-shot path must not run")))
+    monkeypatch.setattr(run_eval, "judge_answer",
+                        lambda case, cand, config, client:
+                            {"verdict": "pass", "reason": "ok"})
+
+    history = [{"role": "user", "content": "how do I set the resolution?"},
+               {"role": "assistant", "content": "Use --output-resolution."}]
+    case = {"source": "feedback", "case_id": 1, "app": "qsiprep",
+            "query": "why?", "reference": "because ...", "history": history}
+    out = run_eval.answer_scores(store=None, cases=[case], config={}, sample=1)
+
+    assert seen["history"] == history
+    assert out["by_path"] == {"agent": {"n": 1, "pass_rate": 1.0}}
+    assert out["details"][0]["path"] == "agent"

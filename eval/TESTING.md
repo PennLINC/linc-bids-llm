@@ -23,7 +23,7 @@ answer to — that's what makes your rating trustworthy):
 | 4 | Cross-version regression ("worked in X, broke in Y") | version awareness, "fixed in vZ" |
 | 5 | Error string you know is in a closed issue | retrieval surfaces the known thread |
 | 6 | Genuinely unanswerable / novel | refuse-to-guess, escalation to issue draft |
-| 7 | A follow-up in the same chat | multi-turn context |
+| 7 | A follow-up in the same chat | agent path (Auto sends every follow-up there), multi-turn context |
 
 ## Rating rubric — judge each answer on
 

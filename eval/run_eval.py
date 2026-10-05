@@ -180,7 +180,9 @@ def answer_scores(store, cases: list[dict], config: dict, sample: int) -> dict:
     by_path: dict = {}
     details = []
     for c in picked:
-        decision = router_mod.route(c["query"], store, config, c["app"])
+        # a follow-up case routes as it did in the app: with its chat history
+        decision = router_mod.route(c["query"], store, config, c["app"],
+                                    history=c.get("history"))
         if decision.path == "oneshot":
             cand = answer_mod.answer_oneshot(c["query"], decision.chunks,
                                              c["app"], config, client=client)

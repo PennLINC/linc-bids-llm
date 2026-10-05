@@ -1,3 +1,5 @@
+import pytest
+
 from src import router
 
 
@@ -79,3 +81,54 @@ def test_route_scopes_query_to_neighbors():
            "apps": {"qsiprep": {"neighbors": ["qsirecon"]}}}
     router.route("what is --output-resolution?", store, cfg, "qsiprep")
     assert store.where == {"app": ["qsiprep", "qsirecon"]}
+
+
+# --- follow-up turns ------------------------------------------------------------
+# The one-shot path takes no chat history, so a short follow-up routed there is
+# answered from chunks retrieved for its bare text alone. In a chat with prior
+# turns the router must pick the agent, the only path that reads history.
+
+HISTORY = [{"role": "user", "content": "how do I set the output resolution?"},
+           {"role": "assistant", "content": "Use --output-resolution ..."}]
+
+FOLLOWUPS = ["can you explain that in more detail?",
+             "which of those should I use?",
+             "what does that flag do?",
+             "why?",
+             "does that also apply to multi-shell data?",
+             "ok and what about on 1.0.0?"]
+
+
+class StrictStore(FakeStore):
+    """Fails the test if the router queries the index at all."""
+    def hybrid_query(self, query, k, where=None):
+        raise AssertionError("follow-up turns must not hit retrieval")
+
+
+def _faq_hit():
+    # a docs chunk both retrieval halves agree on: one-shot bait for bare text
+    return [{"in_vector": True, "in_bm25": True, "source": "docs"}]
+
+
+@pytest.mark.parametrize("question", FOLLOWUPS)
+def test_route_followup_goes_agent_without_retrieval(question):
+    d = router.route(question, StrictStore(_faq_hit()), _cfg(), "qsiprep",
+                     history=HISTORY)
+    assert d.path == "agent"
+    assert d.reason == "follow-up turn; needs chat context"
+    assert d.chunks == []
+
+
+@pytest.mark.parametrize("history", [None, []])
+def test_route_first_turn_still_goes_oneshot(history):
+    # no prior turns (missing or empty) -> behaviour unchanged
+    store = FakeStore(_faq_hit())
+    d = router.route("what does that flag do?", store, _cfg(), "qsiprep",
+                     history=history)
+    assert d.path == "oneshot" and d.chunks is store.results
+
+
+def test_route_traceback_with_history_keeps_traceback_reason():
+    d = router.route("Traceback (most recent call last):\n  File \"x\"",
+                     StrictStore([]), _cfg(), "qsiprep", history=HISTORY)
+    assert d.path == "agent" and "traceback" in d.reason
