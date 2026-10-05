@@ -78,6 +78,8 @@ lists every miss with its cause — the correct URL isn't indexed at all, it's
 filed under an app outside the card's scope, or it's indexed but ranked too
 low; only the last is a ranking problem. The judged step calls the OpenAI API,
 which the Penn Medicine web filter intercepts: run it off-VPN or on the box.
+It judges each case five times and passes it only if every run does; a verdict
+marked `[judge split: …]` means the runs disagreed — read that case yourself.
 
 `eval/regression.json` holds testers' questions and the flagged answers
 verbatim — skim it before committing it to this public repo.

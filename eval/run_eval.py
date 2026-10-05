@@ -135,40 +135,85 @@ JUDGE_SYS_FEEDBACK = (
     "a note on what was wrong or what it should have said. You judge whether a "
     "NEW candidate answer fixes that. Reply with a JSON object: "
     "{\"verdict\": \"pass\"|\"fail\", \"reason\": \"<one sentence>\"}. "
-    "Treat the note as ground truth. Pass if the candidate avoids the problem "
-    "the note describes and agrees with what it says the answer should be, "
-    "even if it adds correct detail beyond the note. Fail if it repeats the "
-    "flagged problem, contradicts the note, or is empty."
+    "Treat the note as ground truth, and read it against the earlier turns of "
+    "the chat when they are given: the complaint may be about something said "
+    "or asked there. Pass only if the candidate avoids the problem the note "
+    "describes and agrees with what it says the answer should be; correct "
+    "detail beyond the note is fine. Fail if it repeats the flagged problem "
+    "anywhere in the answer, gives substantially the same response as the "
+    "flagged answer, contradicts the note, or is empty. If the note is too "
+    "vague to tell whether the problem is fixed, fail and say so."
 )
+
+# A long agent answer often ends on the offending line ("tell me your version
+# and I can..."), so the judge reads answers whole rather than their opening.
+ANSWER_CHARS = 12000
+TURN_CHARS = 1500
+
+
+def _clip(text: str, limit: int) -> str:
+    """`text` if it fits, else its head and tail around a marked gap."""
+    if len(text) <= limit:
+        return text
+    half = limit // 2
+    return (f"{text[:half]}\n[... {len(text) - 2 * half} characters omitted ...]\n"
+            f"{text[-half:]}")
 
 
 def judge_messages(case: dict, candidate: str) -> list[dict]:
+    candidate = _clip(candidate, ANSWER_CHARS)
     if case.get("source") == "feedback":
-        flagged = case.get("flagged_answer") or "(not recorded)"
+        flagged = _clip(case.get("flagged_answer") or "(not recorded)", ANSWER_CHARS)
+        # a follow-up is judged in the chat it was asked in, as it was answered
+        # (clipped as a whole too: the opening turn and the latest ones survive)
+        earlier = _clip("".join(f"[{m['role']}] {_clip(m['content'], TURN_CHARS)}\n"
+                                for m in case.get("history") or []), ANSWER_CHARS)
         return [{"role": "system", "content": JUDGE_SYS_FEEDBACK},
                 {"role": "user", "content": (
-                    f"Question:\n{case['query'][:1500]}\n\n"
+                    (f"Earlier turns of the chat:\n{earlier}\n" if earlier else "")
+                    + f"Question:\n{case['query'][:1500]}\n\n"
                     f"Problem category: {case.get('category') or '(none given)'}\n\n"
                     f"Maintainer's note:\n{case['reference'][:2500]}\n\n"
-                    f"Earlier answer that was flagged:\n{flagged[:2500]}\n\n"
-                    f"New candidate answer:\n{candidate[:2500]}")}]
+                    f"Earlier answer that was flagged:\n{flagged}\n\n"
+                    f"New candidate answer:\n{candidate}")}]
     return [{"role": "system", "content": JUDGE_SYS},
             {"role": "user", "content": (
                 f"Question:\n{case['query'][:1500]}\n\n"
                 f"Historical resolution (reference):\n{case['reference'][:2500]}\n\n"
-                f"Candidate answer:\n{candidate[:2500]}")}]
+                f"Candidate answer:\n{candidate}")}]
+
+
+JUDGE_RUNS = 5
 
 
 def judge_answer(case: dict, candidate: str, config: dict, client) -> dict:
-    msg = client.chat.completions.create(
-        model=config["llm"]["oneshot_model"],
-        messages=judge_messages(case, candidate),
-        max_completion_tokens=300,
-    ).choices[0].message
-    try:
-        return json.loads(msg.content)
-    except (json.JSONDecodeError, TypeError):
-        return {"verdict": "fail", "reason": "unparseable judge output"}
+    """Pass only if every one of JUDGE_RUNS verdicts is a pass.
+
+    On a borderline answer (a vague note, a partial fix) a single verdict is
+    close to a coin flip, and a gate that flips between runs reports
+    regressions that aren't there. A split is failed and labelled as one, so
+    it reads as "look at this case yourself" rather than as a result.
+
+    The runs are sampled at the model's default temperature on purpose: at
+    temperature 0 they agree with each other and the split never shows, while
+    the verdict can still differ the next time the eval is run."""
+    messages = judge_messages(case, candidate)
+    verdicts = []
+    for _ in range(JUDGE_RUNS):
+        msg = client.chat.completions.create(
+            model=config["llm"]["oneshot_model"], messages=messages,
+            max_completion_tokens=300,
+        ).choices[0].message
+        try:
+            verdicts.append(json.loads(msg.content))
+        except (json.JSONDecodeError, TypeError):
+            verdicts.append({"verdict": "fail", "reason": "unparseable judge output"})
+    passes = sum(1 for v in verdicts if v.get("verdict") == "pass")
+    if passes == len(verdicts):
+        return verdicts[0]
+    dissent = next(v for v in verdicts if v.get("verdict") != "pass")
+    split = f"[judge split: {passes} of {len(verdicts)} runs passed] " if passes else ""
+    return {"verdict": "fail", "reason": split + dissent.get("reason", "")}
 
 
 def answer_scores(store, cases: list[dict], config: dict, sample: int) -> dict:
