@@ -10,10 +10,13 @@ __pycache__/
 # The built index stays local until a distribution route is chosen
 # (see "Distributing the index" in BUILD_PLAN.md / README)
 index/
-# transient dirs from refresh.sh (staging build) and fetch_index.sh (backup)
+# transient dirs from refresh.sh (staging build, swap) and fetch_index.sh
+# (unpack dir, the one kept backup), and the flock file the scripts share
 index.staging/
 index.prev.*
+index.fetch.*
 index.bak.*
+.refresh.lock
 
 # Version-pinned shallow clones (rebuilt by src/checkouts.py)
 checkouts/
@@ -23,6 +26,3 @@ checkouts/
 
 # Build artifacts (index tarball for release upload)
 dist/
-
-# flock lock shared by refresh.sh / deploy.sh / fetch_index.sh
-.refresh.lock

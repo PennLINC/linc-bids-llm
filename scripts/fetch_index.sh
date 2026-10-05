@@ -4,9 +4,15 @@
 #
 #   scripts/fetch_index.sh [tag]        # default tag: index-latest
 #
-# Uses `gh` when available (needed for a private repo). On a PUBLIC repo it
-# falls back to a plain curl of the release asset — so a server with no `gh`
-# still works. An existing index/ is moved aside to index.bak.<timestamp>.
+# Uses `gh` when available (needed for a private repo). If gh cannot download
+# — an installed but not logged-in gh refuses even a public repo (exit 4), and
+# during a re-publish the asset is briefly gone — it falls back to a plain curl
+# of the public asset URL, so a server with no (or an idle) `gh` still works.
+#
+# The live index/ is replaced only after the new one is downloaded, unpacked
+# beside it and its manifest checks out; whatever fails before that leaves
+# index/ exactly as it was. The replaced index/ is kept as index.bak.<epoch>,
+# and only that one (each is ~150 MB; older backups are removed).
 #
 # Shares .refresh.lock with refresh.sh and deploy.sh (one of them at a time may
 # touch index/). Taken non-blocking: if a refresh or deploy is running this
@@ -16,6 +22,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 TAG="${1:-index-latest}"
+TARBALL="dist/index.tgz"
+TMP_TARBALL="$TARBALL.tmp"
+UNPACK="index.fetch.$$"
 
 if [ "${REFRESH_LOCK_HELD:-}" != "1" ] && command -v flock >/dev/null 2>&1; then
   exec 9>.refresh.lock
@@ -24,6 +33,10 @@ if [ "${REFRESH_LOCK_HELD:-}" != "1" ] && command -v flock >/dev/null 2>&1; then
     exit 75
   fi
 fi
+
+# However this ends, only this run's transient files go; index/ is never one.
+cleanup() { rm -rf "$UNPACK" "$TMP_TARBALL"; }
+trap cleanup EXIT
 
 # Resolve GitHub CLI explicitly (a bare `gh` can be shadowed on PATH). Real
 # GitHub CLI prints a github.com/cli/cli URL in --version. Override with GH=.
@@ -44,34 +57,78 @@ repo_slug() {
     | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##'
 }
 
-if [ -d index ] && [ -f index/manifest.json ]; then
-  BACKUP="index.bak.$(date +%s)"
-  echo "existing index/ -> $BACKUP"
-  mv index "$BACKUP"
-fi
-
+# 1. download, under a temporary name: index/ is not touched yet.
 mkdir -p dist
+rm -f "$TMP_TARBALL"
+got=""
 if GH="$(find_gh)"; then
   echo "downloading index.tgz from release '$TAG' (using $GH)..."
-  "$GH" release download "$TAG" --pattern index.tgz --dir dist --clobber
-else
+  if "$GH" release download "$TAG" --pattern index.tgz --output "$TMP_TARBALL" --clobber; then
+    got=gh
+  else
+    echo "gh could not download it (not logged in? asset being re-published?); trying the public URL..."
+  fi
+fi
+if [ -z "$got" ]; then
   URL="https://github.com/$(repo_slug)/releases/download/${TAG}/index.tgz"
-  echo "no gh CLI; curl-ing public asset: $URL"
-  curl -fL --retry 3 -o dist/index.tgz "$URL" || {
-    echo "error: download failed. If the repo is private, install gh; else" >&2
-    echo "       check the release tag '$TAG' and asset name." >&2
+  echo "curl-ing public asset: $URL"
+  curl -fL --retry 3 -o "$TMP_TARBALL" "$URL" || {
+    echo "error: download failed; index/ is untouched. If the repo is private, log" >&2
+    echo "       gh in (gh auth login); else check the release tag '$TAG' and asset name." >&2
     exit 1
   }
 fi
-tar xzf dist/index.tgz    # recreates index/ at the repo root
-echo "unpacked index/:"
-python3 - <<'PY'
-import json
-m = json.load(open("index/manifest.json"))
+
+# 2. unpack beside index/, not over it, and check the manifest before trusting it.
+mkdir "$UNPACK"
+tar xzf "$TMP_TARBALL" -C "$UNPACK" || {    # the tarball holds index/...
+  echo "error: could not unpack $TMP_TARBALL; index/ is untouched." >&2
+  exit 1
+}
+if [ ! -f "$UNPACK/index/manifest.json" ]; then
+  echo "error: the tarball has no index/manifest.json; index/ is untouched." >&2
+  exit 1
+fi
+echo "downloaded index:"
+python3 - "$UNPACK/index/manifest.json" <<'PY'
+import json, sys
+try:
+    m = json.load(open(sys.argv[1]))
+    chunks = m.get("chunks")
+    if not (isinstance(chunks, dict) and chunks and sum(chunks.values()) > 0):
+        raise ValueError(f"no chunks in manifest: {chunks!r}")
+except Exception as e:                      # not JSON, not a dict, empty
+    sys.exit(f"error: downloaded index rejected ({e}); index/ is untouched.")
 print(f"  embedding model: {m.get('embedding_model')}")
 print(f"  built_at:        {m.get('built_at')}")
-print(f"  chunks:          {m.get('chunks')}")
+print(f"  chunks:          {chunks}")
 PY
+
+# 3. swap: the old index/ becomes index.bak.<epoch>, the new one takes its place.
+BACKUP=""
+if [ -e index ] || [ -L index ]; then
+  BACKUP="index.bak.$(date +%s)"
+  [ ! -e "$BACKUP" ] || BACKUP="$BACKUP.$$"
+  echo "existing index/ -> $BACKUP/"
+  mv index "$BACKUP"
+fi
+if ! mv "$UNPACK/index" index; then
+  [ -z "$BACKUP" ] || mv "$BACKUP" index
+  echo "error: could not move the new index into place; the old index/ is back." >&2
+  exit 1
+fi
+rmdir "$UNPACK"
+mv "$TMP_TARBALL" "$TARBALL"
+echo "unpacked index/ (tarball kept at $TARBALL)"
+
+# 4. keep one backup, the index just replaced; older ones only eat disk.
+shopt -s nullglob; backups=(index.bak.*); shopt -u nullglob
+if [ "${#backups[@]}" -gt 1 ]; then
+  for old in "${backups[@]:0:${#backups[@]}-1}"; do
+    rm -rf "$old"; echo "removed older backup $old/"
+  done
+fi
+[ -z "$BACKUP" ] || echo "kept one backup: $BACKUP/ (rm -rf it once the new index checks out)"
 
 echo
 echo "next: python -m src.checkouts   # clone code for the agent path (~2 min)"

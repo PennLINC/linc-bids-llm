@@ -2,6 +2,7 @@
 end in a throwaway repo: the real scripts (copied) with python, curl, git, gh,
 flock, journalctl, sudo, systemctl (and, in the refresh tests, package_index.sh)
 replaced by one recording stub — no network, no real index, no service restart."""
+import io
 import json
 import os
 import shutil
@@ -595,6 +596,128 @@ def test_real_flock_deploy_and_fetch_bounce_off_a_held_lock(sandbox, held_lock):
         assert time.monotonic() - t0 < 10                       # no waiting
     assert sandbox.calls() == []
     assert json.loads(sandbox.manifest.read_text()) == OLD
+
+
+# --- fetch_index.sh: the live index/ goes only once the new one checks out ----
+# It used to move index/ to index.bak.<epoch> BEFORE downloading: a failed
+# download (gh installed but not logged in refuses even a public repo; the asset
+# is briefly gone during every re-publish) left no index/, deploy.sh died before
+# its restart, and every nightly refresh after that failed with "no live index".
+
+def tarball(path: Path, manifest=NEW, with_manifest=True) -> Path:
+    """A release-asset lookalike: index/manifest.json + index/fts.sqlite."""
+    with tarfile.open(path, "w:gz") as tf:
+        def add(name, data: bytes):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        if with_manifest:
+            text = manifest if isinstance(manifest, str) else json.dumps(manifest)
+            add("index/manifest.json", text.encode())
+        add("index/fts.sqlite", b"new-db")
+    return path
+
+
+@pytest.fixture
+def asset(sandbox):
+    return tarball(sandbox.root / "index.tgz")
+
+
+def test_fetch_swaps_a_verified_tarball_in(sandbox, asset):
+    r = sandbox.run("fetch_index.sh", FAKE_TARBALL=asset)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert json.loads(sandbox.manifest.read_text()) == NEW
+    assert (sandbox.repo / "index" / "fts.sqlite").read_text() == "new-db"
+    assert sandbox.calls() == ["flock -n 9", "gh release download index-latest"
+                               " --pattern index.tgz --output dist/index.tgz.tmp --clobber"]
+    assert "downloaded index:" in r.stdout                      # the manifest check ran
+    assert "chunks:          {'docs': 100, 'issues': 205}" in r.stdout
+    (backup,) = sandbox.leftovers()                              # one backup, nothing else
+    assert backup.startswith("index.bak.") and backup[len("index.bak."):].isdigit()
+    assert json.loads((sandbox.repo / backup / "manifest.json").read_text()) == OLD
+    assert f"kept one backup: {backup}/" in r.stdout
+    assert (sandbox.repo / "dist" / "index.tgz").read_bytes() == asset.read_bytes()
+    assert not (sandbox.repo / "dist" / "index.tgz.tmp").exists()
+
+
+def test_fetch_falls_back_to_curl_when_gh_refuses(sandbox, asset):
+    r = sandbox.run("fetch_index.sh", FAKE_TARBALL=asset, FAKE_GH_RC=4)   # gh: not logged in
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "trying the public URL" in r.stdout
+    assert ("curl -fL --retry 3 -o dist/index.tgz.tmp https://github.com/PennLINC/"
+            "linc-bids-llm/releases/download/index-latest/index.tgz") in sandbox.calls()
+    assert json.loads(sandbox.manifest.read_text()) == NEW
+
+
+def test_fetch_download_failure_leaves_index_untouched(sandbox, asset):
+    (sandbox.repo / "dist").mkdir()
+    (sandbox.repo / "dist" / "index.tgz").write_bytes(b"last good tarball")
+    r = sandbox.run("fetch_index.sh", FAKE_TARBALL=asset, FAKE_GH_RC=4, FAKE_CURL_RC=22)
+    assert r.returncode == 1
+    assert "download failed; index/ is untouched" in r.stderr
+    assert json.loads(sandbox.manifest.read_text()) == OLD
+    assert (sandbox.repo / "index" / "fts.sqlite").read_text() == "live-db"
+    assert sandbox.leftovers() == []                            # no index.bak.*, no index.fetch.*
+    assert sorted(p.name for p in (sandbox.repo / "dist").iterdir()) == ["index.tgz"]
+    assert (sandbox.repo / "dist" / "index.tgz").read_bytes() == b"last good tarball"
+    assert [c.split()[0] for c in sandbox.calls()] == ["flock", "gh", "git", "curl"]   # git: the
+    assert "downloaded index:" not in r.stdout                  #   slug for the URL; nothing unpacked
+
+
+@pytest.mark.parametrize("bad", [
+    pytest.param({"chunks": {}}, id="empty-chunks"),
+    pytest.param({"chunks": {"docs": 0}}, id="zero-chunks"),
+    pytest.param({"built_at": "x"}, id="no-chunks-key"),
+    pytest.param({"chunks": [1, 2]}, id="chunks-not-a-map"),
+    pytest.param("not json", id="not-json"),
+    pytest.param(None, id="no-manifest"),
+    pytest.param(b"not a tarball at all", id="not-a-tarball"),
+])
+def test_fetch_rejects_a_tarball_without_a_valid_manifest(sandbox, bad):
+    path = sandbox.root / "bad.tgz"
+    if isinstance(bad, bytes):
+        path.write_bytes(bad)
+    else:
+        tarball(path, manifest=bad, with_manifest=bad is not None)
+    r = sandbox.run("fetch_index.sh", FAKE_TARBALL=path)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "index/ is untouched" in r.stderr
+    assert json.loads(sandbox.manifest.read_text()) == OLD
+    assert (sandbox.repo / "index" / "fts.sqlite").read_text() == "live-db"
+    assert sandbox.leftovers() == []
+    assert not (sandbox.repo / "dist" / "index.tgz.tmp").exists()
+
+
+def test_fetch_keeps_only_the_newest_backup(sandbox, asset):
+    for name in ("index.bak.1000000000", "index.bak.1000000001"):
+        (sandbox.repo / name).mkdir()
+        (sandbox.repo / name / "manifest.json").write_text("{}")
+    r = sandbox.run("fetch_index.sh", FAKE_TARBALL=asset)
+    assert r.returncode == 0, r.stdout + r.stderr
+    (backup,) = sandbox.leftovers()
+    assert backup not in ("index.bak.1000000000", "index.bak.1000000001")
+    assert json.loads((sandbox.repo / backup / "manifest.json").read_text()) == OLD
+    assert "removed older backup index.bak.1000000000/" in r.stdout
+    assert "removed older backup index.bak.1000000001/" in r.stdout
+
+
+def test_fetch_onto_a_box_with_no_index_yet(sandbox, asset):
+    shutil.rmtree(sandbox.repo / "index")                       # a fresh server
+    r = sandbox.run("fetch_index.sh", FAKE_TARBALL=asset)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert json.loads(sandbox.manifest.read_text()) == NEW
+    assert sandbox.leftovers() == [] and "kept one backup" not in r.stdout
+
+
+def test_deploy_refresh_index_fetches_under_the_lock_it_already_holds(sandbox, asset):
+    # With flock(1) present (Linux) deploy.sh holds the lock while it runs
+    # fetch_index.sh; a child that tried to take it again would exit 75.
+    sandbox.use_real_flock()
+    r = sandbox.run("deploy.sh", FAKE_TARBALL=asset, REFRESH_INDEX=1)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert json.loads(sandbox.manifest.read_text()) == NEW
+    assert [c.split()[0] for c in sandbox.calls()] == ["git", "python", "gh", "sudo", "sudo", "git"]
+    assert r.stdout.endswith("deployed abc1234\n")
 
 
 # --- hc_ping.sh ------------------------------------------------------------
