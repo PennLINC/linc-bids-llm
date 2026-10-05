@@ -1,6 +1,8 @@
-"""refresh.sh, hc_ping.sh and package_index.sh end to end in a throwaway repo:
-the real scripts (copied) with python, curl, journalctl, sudo, systemctl and gh
+"""refresh.sh, deploy.sh, fetch_index.sh, package_index.sh and hc_ping.sh end to
+end in a throwaway repo: the real scripts (copied) with python, curl, git, gh,
+flock, journalctl, sudo, systemctl (and, in the refresh tests, package_index.sh)
 replaced by one recording stub — no network, no real index, no service restart."""
+import io
 import json
 import os
 import shutil
@@ -17,6 +19,11 @@ SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None,
                                 reason="bash not installed")
 
+# The scripts see PATH=<sandbox>/bin:/usr/bin:/bin; flock(1) lives in /usr/bin on
+# Linux and does not exist on macOS (where the scripts run unlocked).
+REAL_FLOCK = shutil.which("flock", path="/usr/bin:/bin")
+needs_flock = pytest.mark.skipif(REAL_FLOCK is None, reason="no flock(1) here (macOS)")
+
 OLD = {"chunks": {"docs": 100, "issues": 200}, "built_at": "old"}
 NEW = {"chunks": {"docs": 100, "issues": 205}, "built_at": "new"}
 URL = "https://hc.invalid/ping/1234-uuid"     # .invalid: can never reach a real check
@@ -27,15 +34,19 @@ RUN_ID = "0123456789abcdef0123456789abcdef"   # the shape of systemd's $INVOCATI
 # appends "<name> <args>" to $STUB_LOG. (One file, not several: macOS spends ~0.4 s
 # vetting each brand-new executable on first exec; symlinks to it are free.)
 #   envpy             ENV_PY stand-in: -m src.checkouts / -m src.ingest (writes a
-#                     manifest into $BIDS_INDEX_PATH) / "- <staging>" (the stdin-fed
-#                     validation heredoc, handed to the real interpreter)
+#                     manifest into $BIDS_INDEX_PATH) / -m pip / "- <staging>" (the
+#                     stdin-fed validation heredoc, handed to the real interpreter)
 #   package_index.sh  records its args and the GH_TOKEN it was given (refresh.sh
 #                     tests; the package_index.sh tests swap in the real script)
-#   gh                answers --version like the real CLI and records the rest;
-#                     $FAKE_GH_RC is the status of `gh release upload`
+#   gh                answers --version like the real CLI (unlogged); release
+#                     upload exits $FAKE_GH_RC; release download exits
+#                     $FAKE_GH_RC or copies $FAKE_TARBALL to --output
 #   tar               (only when a test asks for it) writes a partial archive
 #                     and fails
-#   curl              like real curl, reads stdin only when asked to (@-)
+#   curl              like real curl, reads stdin only when asked to (@-); with
+#                     -o <file> and $FAKE_TARBALL set, "downloads" that file
+#   git               records; answers remote.origin.url and rev-parse
+#   flock             exits $FAKE_FLOCK_RC (1 = "someone else holds the lock")
 #   journalctl        prints $FAKE_JOURNAL
 #   sudo, systemctl   record only (nothing is restarted)
 #   sleep             returns at once (hc_ping.sh pauses 1 s for journald)
@@ -52,6 +63,7 @@ case "$name" in
         [ -z "${FAKE_INGEST_SLEEP:-}" ] || /bin/sleep "$FAKE_INGEST_SLEEP"
         [ "${FAKE_INGEST_RC:-0}" = 0 ] || exit "$FAKE_INGEST_RC"
         printf '%s' "$FAKE_MANIFEST" > "$BIDS_INDEX_PATH/manifest.json" ;;
+      "-m pip") exit 0 ;;
       "- "*) exec "$REAL_PY" "$@" ;;
       *) echo "fake python: unexpected args: $*" >&2; exit 97 ;;
     esac ;;
@@ -63,11 +75,15 @@ case "$name" in
       *) exit 98 ;;
     esac ;;
   gh)
+    if [ "${1:-}" = --version ]; then
+      echo "gh version 2 (https://github.com/cli/cli/releases)"; exit 0
+    fi
     echo "$name $*" >> "$STUB_LOG"
-    case "${1:-} ${2:-}" in
-      "--version "*) echo "gh version 2 (https://github.com/cli/cli/releases)" ;;
-      "release upload") exit "${FAKE_GH_RC:-0}" ;;
-    esac ;;
+    case "${1:-} ${2:-}" in                                   # view/create always succeed
+      "release upload"|"release download") [ "${FAKE_GH_RC:-0}" = 0 ] || exit "$FAKE_GH_RC" ;;
+    esac
+    out=""; while [ $# -gt 0 ]; do [ "$1" = --output ] && out="${2:-}"; shift; done
+    [ -z "$out" ] || cp "$FAKE_TARBALL" "$out" ;;           # download --output: deliver it
   tar)
     echo "truncated archive" > "$2"
     exit 2 ;;
@@ -75,7 +91,18 @@ case "$name" in
     echo "$name $*" >> "$STUB_LOG"
     case " $* " in *"@-"*) cat >> "$STUB_LOG.curl-stdin" ;; esac
     [ -z "${FAKE_CURL_SLEEP:-}" ] || /bin/sleep "$FAKE_CURL_SLEEP"
-    exit "${FAKE_CURL_RC:-0}" ;;
+    [ "${FAKE_CURL_RC:-0}" = 0 ] || exit "$FAKE_CURL_RC"
+    out=""; while [ $# -gt 0 ]; do [ "$1" = -o ] && out="${2:-}"; shift; done
+    [ -z "$out" ] || [ -z "${FAKE_TARBALL:-}" ] || cp "$FAKE_TARBALL" "$out" ;;
+  git)
+    echo "$name $*" >> "$STUB_LOG"
+    case "$*" in
+      "config --get remote.origin.url") echo "git@github.com:PennLINC/linc-bids-llm.git" ;;
+      "rev-parse --short HEAD") echo "abc1234" ;;
+    esac ;;
+  flock)
+    echo "$name $*" >> "$STUB_LOG"
+    exit "${FAKE_FLOCK_RC:-0}" ;;
   journalctl)
     echo "$name $*" >> "$STUB_LOG"
     printf '%s' "${FAKE_JOURNAL:-}" ;;
@@ -104,11 +131,14 @@ class Sandbox:
         self._stub = stub
         (self.repo / "scripts").mkdir(parents=True)
         (self.repo / "bin").mkdir()
-        for name in ("refresh.sh", "hc_ping.sh"):
+        for name in ("refresh.sh", "deploy.sh", "fetch_index.sh", "hc_ping.sh"):
             shutil.copy(SCRIPTS / name, self.repo / "scripts" / name)
-        for rel in ("scripts/package_index.sh", "bin/envpy", "bin/curl", "bin/sleep",
-                    "bin/journalctl", "bin/sudo", "bin/systemctl"):
+        for rel in ("scripts/package_index.sh", "bin/envpy", "bin/curl", "bin/gh",
+                    "bin/git", "bin/flock", "bin/sleep", "bin/journalctl", "bin/sudo",
+                    "bin/systemctl"):
             (self.repo / rel).symlink_to(stub)
+        # python3 (fetch_index.sh / package_index.sh print the manifest with it): real
+        (self.repo / "bin" / "python3").symlink_to(sys.executable)
         (self.repo / "index").mkdir()
         self.manifest.write_text(json.dumps(OLD))
         (self.repo / "index" / "fts.sqlite").write_text("live-db")
@@ -121,13 +151,22 @@ class Sandbox:
         """Put one more stubbed command on PATH."""
         (self.repo / "bin" / name).symlink_to(self._stub)
 
+    @property
+    def lockfile(self) -> Path:
+        return self.repo / ".refresh.lock"
+
+    def use_real_flock(self):
+        """Drop the flock stub so the scripts find /usr/bin/flock (Linux) or
+        nothing at all (macOS) — what they meet outside the sandbox."""
+        (self.repo / "bin" / "flock").unlink()
+
     def dotenv(self, text: str):
         (self.repo / ".env").write_text(text)
 
-    def run(self, script="refresh.sh", *args, **over):
+    def env(self, **over) -> dict:
         # A from-scratch env (nothing inherited): the developer's GH_TOKEN /
         # SKIP_* / HEALTHCHECK_URL can't leak in, and the stubs win on PATH.
-        env = {
+        return {
             "PATH": f"{self.repo / 'bin'}:/usr/bin:/bin",
             "HOME": str(self.root / "home"),
             "ENV_PY": str(self.repo / "bin" / "envpy"),
@@ -137,10 +176,18 @@ class Sandbox:
             "SERVICE": "sandbox-svc",     # if a stub ever lost the PATH race: a no-op
             **{k: str(v) for k, v in over.items()},
         }
+
+    def run(self, script="refresh.sh", *args, **over):
         # cwd is deliberately NOT the repo: the scripts must cd there themselves.
         return subprocess.run(["bash", str(self.repo / "scripts" / script), *args],
-                              env=env, cwd=self.root, stdin=subprocess.DEVNULL,
+                              env=self.env(**over), cwd=self.root, stdin=subprocess.DEVNULL,
                               capture_output=True, text=True, timeout=60)
+
+    def start(self, script="refresh.sh", *args, **over) -> subprocess.Popen:
+        """run(), but in the background (for a script that has to wait on us)."""
+        return subprocess.Popen(["bash", str(self.repo / "scripts" / script), *args],
+                                env=self.env(**over), cwd=self.root, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     def run_unit(self, **over):
         """What systemd does with the refresh unit: ExecStartPre (start ping),
@@ -179,6 +226,20 @@ def sandbox(tmp_path, stub):
     return Sandbox(tmp_path, stub)
 
 
+@pytest.fixture
+def held_lock(sandbox):
+    """.refresh.lock held from this process with the real flock(2), exactly as a
+    concurrent refresh or deploy holds it (the fd is not inherited: subprocess
+    closes fds by default). Yields a release(); teardown releases regardless.
+    The sandbox uses the real flock(1)."""
+    import fcntl
+    sandbox.use_real_flock()
+    fd = os.open(sandbox.lockfile, os.O_WRONLY | os.O_CREAT, 0o644)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    yield lambda: fcntl.flock(fd, fcntl.LOCK_UN)
+    os.close(fd)
+
+
 # --- refresh.sh ------------------------------------------------------------
 
 def test_scripts_are_executable():
@@ -195,6 +256,7 @@ def test_green_run_swaps_packages_restarts_and_publishes(sandbox):
     calls, build = sandbox.calls(), "package_index.sh  GH_TOKEN=<unset>"
     assert calls.index(build) == calls.index("sudo systemctl restart sandbox-svc") - 1
     assert [c for c in calls if c != build] == [                # tarball BEFORE the restart
+        "flock -n 9",                                           # the lock, before anything else
         "python -m src.checkouts",
         "python -m src.ingest BIDS_INDEX_PATH=index.staging",
         "python - index.staging index",                         # the validation heredoc
@@ -281,7 +343,8 @@ def test_a_small_source_may_shrink_to_nothing(sandbox):
 def test_skip_knobs(sandbox):
     r = sandbox.run(SKIP_CHECKOUTS=1, SKIP_RESTART=1, SKIP_PUBLISH=1)
     assert r.returncode == 0, r.stderr
-    assert sandbox.calls() == ["python -m src.ingest BIDS_INDEX_PATH=index.staging",
+    assert sandbox.calls() == ["flock -n 9",
+                               "python -m src.ingest BIDS_INDEX_PATH=index.staging",
                                "python - index.staging index"]
     assert "skipping service restart" in r.stdout
 
@@ -290,7 +353,7 @@ def test_no_live_index_errors_out(sandbox):
     sandbox.manifest.unlink()
     r = sandbox.run()
     assert r.returncode == 1 and "no live index" in r.stderr
-    assert sandbox.calls() == []                                # stopped before doing anything
+    assert sandbox.calls() == ["flock -n 9"]                    # stopped before doing anything
 
 
 def test_publish_failure_fails_the_run_after_everything_else(sandbox):
@@ -364,8 +427,8 @@ def test_exported_gh_token_wins_over_dotenv(sandbox):
 def _real_package_script(sandbox):
     (sandbox.repo / "scripts" / "package_index.sh").unlink()    # replace the stub
     shutil.copy(SCRIPTS / "package_index.sh", sandbox.repo / "scripts")
-    sandbox.fake("gh")                                          # first on PATH: a real gh is never reached
-    (sandbox.repo / "bin" / "python3").symlink_to(sys.executable)   # it prints the manifest
+    # gh (stub, first on PATH: a real gh is never reached) and python3 are
+    # already there — the sandbox puts both on PATH for every script.
 
 
 def test_plain_package_builds_the_tarball_and_uploads_nothing(sandbox):
@@ -438,6 +501,223 @@ def test_refresh_with_the_real_package_script_reports_a_failed_upload(sandbox):
     r = sandbox.run(FAKE_GH_RC=1)                               # e.g. an expired token
     assert r.returncode == 3 and "FAILED after the swap: publish." in r.stdout
     assert json.loads(sandbox.manifest.read_text()) == NEW
+
+
+# --- the lock: refresh.sh / deploy.sh / fetch_index.sh never overlap ---------
+# Two refreshes at once: B's `rm -rf index.staging` deletes A's in-flight build,
+# B swaps, A's swap then fails after `mv index index.prev.<pid>` — no index/ left
+# and every later run aborts with "no live index". A deploy under a running
+# ingest pip-installs into the env the ingest is using. One lock for all three.
+
+def test_refresh_waits_then_exits_75_when_the_lock_is_held(sandbox):
+    r = sandbox.run(FAKE_FLOCK_RC=1)
+    assert r.returncode == 75, r.stdout + r.stderr
+    assert sandbox.calls() == ["flock -n 9", "flock -w 600 9"]  # tried, waited, nothing else
+    assert "another refresh/deploy is running" in r.stdout
+    assert "waiting up to 600s" in r.stdout and "exit 75" in r.stdout
+    assert "FAILED" not in r.stdout                             # a clean stand-down, not an error
+    assert json.loads(sandbox.manifest.read_text()) == OLD
+    assert sandbox.leftovers() == []                            # no staging dir was even seeded
+
+
+def test_lock_wait_knob(sandbox):
+    r = sandbox.run(FAKE_FLOCK_RC=1, LOCK_WAIT=7)
+    assert r.returncode == 75
+    assert sandbox.calls() == ["flock -n 9", "flock -w 7 9"]
+
+
+def test_deploy_green_run(sandbox):
+    r = sandbox.run("deploy.sh")
+    assert r.returncode == 0, r.stderr
+    assert sandbox.calls() == [
+        "flock -n 9",
+        "git pull --ff-only",
+        "python -m pip install -q -r requirements.txt",
+        "sudo systemctl restart sandbox-svc",
+        "sudo systemctl --no-pager --lines=0 status sandbox-svc",
+        "git rev-parse --short HEAD",
+    ]
+    assert r.stdout.endswith("deployed abc1234\n")
+
+
+def test_deploy_exits_75_at_once_when_the_lock_is_held(sandbox):
+    r = sandbox.run("deploy.sh")                                # baseline: 0 with the lock free
+    assert r.returncode == 0
+    sandbox.log.unlink()
+    r = sandbox.run("deploy.sh", FAKE_FLOCK_RC=1)
+    assert r.returncode == 75
+    assert sandbox.calls() == ["flock -n 9"]                    # non-blocking: no -w, no git pull
+    assert "a refresh is running — wait for it to finish, then retry" in r.stderr
+
+
+def test_fetch_exits_75_at_once_when_the_lock_is_held(sandbox):
+    r = sandbox.run("fetch_index.sh", FAKE_FLOCK_RC=1)
+    assert r.returncode == 75
+    assert sandbox.calls() == ["flock -n 9"]
+    assert "a refresh or deploy is running" in r.stderr
+    assert json.loads(sandbox.manifest.read_text()) == OLD and sandbox.leftovers() == []
+
+
+def test_lock_file_is_gitignored():
+    root = SCRIPTS.parent
+    assert ".refresh.lock" in (root / ".gitignore").read_text().split()
+
+
+@needs_flock
+def test_real_flock_refresh_gives_up_after_lock_wait(sandbox, held_lock):
+    t0 = time.monotonic()
+    r = sandbox.run(LOCK_WAIT=1)
+    assert r.returncode == 75, r.stdout + r.stderr
+    assert 1 <= time.monotonic() - t0 < 30
+    assert "waiting up to 1s" in r.stdout and "giving up" in r.stdout
+    assert sandbox.calls() == []                                # not even the checkout update
+    assert json.loads(sandbox.manifest.read_text()) == OLD and sandbox.leftovers() == []
+
+
+@needs_flock
+def test_real_flock_refresh_proceeds_once_the_lock_is_released(sandbox, held_lock):
+    proc = sandbox.start("refresh.sh", LOCK_WAIT=30)
+    first = proc.stdout.readline()                              # blocks until it says so
+    assert "waiting up to 30s" in first
+    assert sandbox.calls() == []                                # it really is waiting
+    held_lock()                                                 # the other run finishes
+    out, err = proc.communicate(timeout=60)
+    assert proc.returncode == 0, out + err
+    assert "lock acquired." in out and out.endswith("done.\n")
+    assert json.loads(sandbox.manifest.read_text()) == NEW
+
+
+@needs_flock
+def test_real_flock_deploy_and_fetch_bounce_off_a_held_lock(sandbox, held_lock):
+    for script in ("deploy.sh", "fetch_index.sh"):
+        t0 = time.monotonic()
+        r = sandbox.run(script)
+        assert r.returncode == 75, script + r.stderr
+        assert time.monotonic() - t0 < 10                       # no waiting
+    assert sandbox.calls() == []
+    assert json.loads(sandbox.manifest.read_text()) == OLD
+
+
+# --- fetch_index.sh: the live index/ goes only once the new one checks out ----
+# It used to move index/ to index.bak.<epoch> BEFORE downloading: a failed
+# download (gh installed but not logged in refuses even a public repo; the asset
+# is briefly gone during every re-publish) left no index/, deploy.sh died before
+# its restart, and every nightly refresh after that failed with "no live index".
+
+def tarball(path: Path, manifest=NEW, with_manifest=True) -> Path:
+    """A release-asset lookalike: index/manifest.json + index/fts.sqlite."""
+    with tarfile.open(path, "w:gz") as tf:
+        def add(name, data: bytes):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        if with_manifest:
+            text = manifest if isinstance(manifest, str) else json.dumps(manifest)
+            add("index/manifest.json", text.encode())
+        add("index/fts.sqlite", b"new-db")
+    return path
+
+
+@pytest.fixture
+def asset(sandbox):
+    return tarball(sandbox.root / "index.tgz")
+
+
+def test_fetch_swaps_a_verified_tarball_in(sandbox, asset):
+    r = sandbox.run("fetch_index.sh", FAKE_TARBALL=asset)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert json.loads(sandbox.manifest.read_text()) == NEW
+    assert (sandbox.repo / "index" / "fts.sqlite").read_text() == "new-db"
+    assert sandbox.calls() == ["flock -n 9", "gh release download index-latest"
+                               " --pattern index.tgz --output dist/index.tgz.tmp --clobber"]
+    assert "downloaded index:" in r.stdout                      # the manifest check ran
+    assert "chunks:          {'docs': 100, 'issues': 205}" in r.stdout
+    (backup,) = sandbox.leftovers()                              # one backup, nothing else
+    assert backup.startswith("index.bak.") and backup[len("index.bak."):].isdigit()
+    assert json.loads((sandbox.repo / backup / "manifest.json").read_text()) == OLD
+    assert f"kept one backup: {backup}/" in r.stdout
+    assert (sandbox.repo / "dist" / "index.tgz").read_bytes() == asset.read_bytes()
+    assert not (sandbox.repo / "dist" / "index.tgz.tmp").exists()
+
+
+def test_fetch_falls_back_to_curl_when_gh_refuses(sandbox, asset):
+    r = sandbox.run("fetch_index.sh", FAKE_TARBALL=asset, FAKE_GH_RC=4)   # gh: not logged in
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "trying the public URL" in r.stdout
+    assert ("curl -fL --retry 3 -o dist/index.tgz.tmp https://github.com/PennLINC/"
+            "linc-bids-llm/releases/download/index-latest/index.tgz") in sandbox.calls()
+    assert json.loads(sandbox.manifest.read_text()) == NEW
+
+
+def test_fetch_download_failure_leaves_index_untouched(sandbox, asset):
+    (sandbox.repo / "dist").mkdir()
+    (sandbox.repo / "dist" / "index.tgz").write_bytes(b"last good tarball")
+    r = sandbox.run("fetch_index.sh", FAKE_TARBALL=asset, FAKE_GH_RC=4, FAKE_CURL_RC=22)
+    assert r.returncode == 1
+    assert "download failed; index/ is untouched" in r.stderr
+    assert json.loads(sandbox.manifest.read_text()) == OLD
+    assert (sandbox.repo / "index" / "fts.sqlite").read_text() == "live-db"
+    assert sandbox.leftovers() == []                            # no index.bak.*, no index.fetch.*
+    assert sorted(p.name for p in (sandbox.repo / "dist").iterdir()) == ["index.tgz"]
+    assert (sandbox.repo / "dist" / "index.tgz").read_bytes() == b"last good tarball"
+    assert [c.split()[0] for c in sandbox.calls()] == ["flock", "gh", "git", "curl"]   # git: the
+    assert "downloaded index:" not in r.stdout                  #   slug for the URL; nothing unpacked
+
+
+@pytest.mark.parametrize("bad", [
+    pytest.param({"chunks": {}}, id="empty-chunks"),
+    pytest.param({"chunks": {"docs": 0}}, id="zero-chunks"),
+    pytest.param({"built_at": "x"}, id="no-chunks-key"),
+    pytest.param({"chunks": [1, 2]}, id="chunks-not-a-map"),
+    pytest.param("not json", id="not-json"),
+    pytest.param(None, id="no-manifest"),
+    pytest.param(b"not a tarball at all", id="not-a-tarball"),
+])
+def test_fetch_rejects_a_tarball_without_a_valid_manifest(sandbox, bad):
+    path = sandbox.root / "bad.tgz"
+    if isinstance(bad, bytes):
+        path.write_bytes(bad)
+    else:
+        tarball(path, manifest=bad, with_manifest=bad is not None)
+    r = sandbox.run("fetch_index.sh", FAKE_TARBALL=path)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "index/ is untouched" in r.stderr
+    assert json.loads(sandbox.manifest.read_text()) == OLD
+    assert (sandbox.repo / "index" / "fts.sqlite").read_text() == "live-db"
+    assert sandbox.leftovers() == []
+    assert not (sandbox.repo / "dist" / "index.tgz.tmp").exists()
+
+
+def test_fetch_keeps_only_the_newest_backup(sandbox, asset):
+    for name in ("index.bak.1000000000", "index.bak.1000000001"):
+        (sandbox.repo / name).mkdir()
+        (sandbox.repo / name / "manifest.json").write_text("{}")
+    r = sandbox.run("fetch_index.sh", FAKE_TARBALL=asset)
+    assert r.returncode == 0, r.stdout + r.stderr
+    (backup,) = sandbox.leftovers()
+    assert backup not in ("index.bak.1000000000", "index.bak.1000000001")
+    assert json.loads((sandbox.repo / backup / "manifest.json").read_text()) == OLD
+    assert "removed older backup index.bak.1000000000/" in r.stdout
+    assert "removed older backup index.bak.1000000001/" in r.stdout
+
+
+def test_fetch_onto_a_box_with_no_index_yet(sandbox, asset):
+    shutil.rmtree(sandbox.repo / "index")                       # a fresh server
+    r = sandbox.run("fetch_index.sh", FAKE_TARBALL=asset)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert json.loads(sandbox.manifest.read_text()) == NEW
+    assert sandbox.leftovers() == [] and "kept one backup" not in r.stdout
+
+
+def test_deploy_refresh_index_fetches_under_the_lock_it_already_holds(sandbox, asset):
+    # With flock(1) present (Linux) deploy.sh holds the lock while it runs
+    # fetch_index.sh; a child that tried to take it again would exit 75.
+    sandbox.use_real_flock()
+    r = sandbox.run("deploy.sh", FAKE_TARBALL=asset, REFRESH_INDEX=1)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert json.loads(sandbox.manifest.read_text()) == NEW
+    assert [c.split()[0] for c in sandbox.calls()] == ["git", "python", "gh", "sudo", "sudo", "git"]
+    assert r.stdout.endswith("deployed abc1234\n")
 
 
 # --- hc_ping.sh ------------------------------------------------------------

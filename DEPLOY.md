@@ -140,6 +140,16 @@ are soft/email-only), so the app's ceiling is the only hard stop:
 scripts/deploy.sh                 # git pull + deps + restart service
 ```
 
+If the nightly refresh is running at that moment, `deploy.sh` stops at once
+with `a refresh is running — wait for it to finish, then retry` (exit 75) and
+changes nothing: `refresh.sh`, `deploy.sh` and `fetch_index.sh` share one lock
+(`.refresh.lock`, via `flock`), so a deploy can neither pip-install under a
+running ingest nor swap `index/` under it. Follow the run with
+`journalctl -fu bids-assistant-refresh.service`, then retry. The other way
+round, a refresh that finds a deploy running waits up to `LOCK_WAIT` seconds
+(default 600) and then also gives up with exit 75 — which the healthcheck
+reports as a failed run.
+
 `deploy.sh` does not install systemd units. After a pull that changes anything
 in `deploy/`, re-install them:
 
@@ -267,6 +277,19 @@ python -m src.ingest && scripts/package_index.sh --upload
 # server
 REFRESH_INDEX=1 scripts/deploy.sh
 ```
+
+> **Not on the server while the nightly timer is enabled.** The server is the
+> *publisher* of that asset: the next 03:30 UTC run rebuilds its own index and
+> re-publishes, overwriting whatever was fetched, so the fetch buys one day at
+> most. To refresh the server by hand, start the unit instead — same lock, same
+> monitoring: `sudo systemctl start --no-block bids-assistant-refresh.service`.
+> The fallback above is for a box without the timer and for local dev.
+
+`fetch_index.sh` downloads and checks the new index before it touches `index/`
+(`gh` first, then the public URL — an installed but logged-out `gh` refuses
+even a public repo), so a failed or half-published download leaves the live
+index as it was and `deploy.sh` stops before its restart. It keeps one
+`index.bak.<epoch>`, the index it replaced, and removes older ones.
 
 The GitHub release asset is now just a backup/distribution snapshot — the server
 no longer depends on it once the timer is enabled.
