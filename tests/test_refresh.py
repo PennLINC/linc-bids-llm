@@ -171,7 +171,7 @@ def test_green_run_swaps_restarts_and_publishes(sandbox):
     assert sandbox.calls() == [
         "python -m src.checkouts",
         "python -m src.ingest BIDS_INDEX_PATH=index.staging",
-        "python - index.staging",                               # the validation heredoc
+        "python - index.staging index",                         # the validation heredoc
         "sudo systemctl restart sandbox-svc",
         "package_index.sh --upload GH_TOKEN=<unset>",
     ]
@@ -204,11 +204,59 @@ def test_empty_staging_fails_validation(sandbox):
     assert not any(c.startswith("sudo") for c in sandbox.calls())
 
 
+# --- the shrink guard: a source that lost a big share of its chunks is a
+#     harvest that failed quietly, and the total alone never shows it ---------
+
+def shrunk(**chunks) -> str:
+    return json.dumps({"chunks": {**OLD["chunks"], **chunks}, "built_at": "new"})
+
+
+@pytest.mark.parametrize("staging", [shrunk(issues=100),                 # 200 -> 100
+                                     json.dumps({"chunks": {"docs": 100}})])  # issues gone
+def test_a_source_losing_half_its_chunks_fails_validation(sandbox, staging):
+    r = sandbox.run(FAKE_MANIFEST=staging)
+    assert r.returncode != 0
+    assert "staging index shrank" in r.stderr and "ALLOW_SHRINK=1" in r.stderr
+    assert "issues 200 -> " in r.stderr                         # names the source + both counts
+    assert "staging OK" not in r.stdout
+    assert json.loads(sandbox.manifest.read_text()) == OLD      # live index untouched
+    assert (sandbox.repo / "index" / "fts.sqlite").read_text() == "live-db"
+    assert not any(c.startswith(("sudo", "package_index.sh")) for c in sandbox.calls())
+    assert sandbox.leftovers() == ["index.staging"]
+
+
+def test_an_ordinary_small_decrease_passes(sandbox):
+    r = sandbox.run(FAKE_MANIFEST=shrunk(issues=190))           # 200 -> 190: closed threads
+    assert r.returncode == 0, r.stderr
+    assert "staging OK: 290 chunks, built new" in r.stdout
+    assert json.loads(sandbox.manifest.read_text())["chunks"]["issues"] == 190
+
+
+def test_allow_shrink_lets_the_big_drop_through(sandbox):
+    r = sandbox.run(FAKE_MANIFEST=shrunk(issues=100), ALLOW_SHRINK=1)
+    assert r.returncode == 0, r.stderr
+    assert "issues: 200 -> 100 chunks (50% lost)" in r.stderr   # still said out loud
+    assert "WARNING: ALLOW_SHRINK=1" in r.stdout
+    assert "staging OK: 200 chunks, built new" in r.stdout
+    assert json.loads(sandbox.manifest.read_text())["chunks"]["issues"] == 100
+    assert any(c.startswith("sudo") for c in sandbox.calls())  # swapped + restarted
+
+
+def test_a_small_source_may_shrink_to_nothing(sandbox):
+    live = {"chunks": {**OLD["chunks"], "neurostars": 2}, "built_at": "old"}   # cubids-sized
+    sandbox.manifest.write_text(json.dumps(live))
+    for staging in (shrunk(neurostars=0), shrunk()):            # 2 -> 0, and 2 -> absent
+        r = sandbox.run(FAKE_MANIFEST=staging)
+        assert r.returncode == 0, r.stderr
+        assert "shrank" not in r.stderr and "lost" not in r.stderr
+        sandbox.manifest.write_text(json.dumps(live))
+
+
 def test_skip_knobs(sandbox):
     r = sandbox.run(SKIP_CHECKOUTS=1, SKIP_RESTART=1, SKIP_PUBLISH=1)
     assert r.returncode == 0, r.stderr
     assert sandbox.calls() == ["python -m src.ingest BIDS_INDEX_PATH=index.staging",
-                               "python - index.staging"]
+                               "python - index.staging index"]
     assert "skipping service restart" in r.stdout
 
 
