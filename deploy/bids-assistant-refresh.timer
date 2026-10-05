@@ -1,11 +1,19 @@
 # Runs the refresh nightly. Install alongside the .service (see DEPLOY.md).
+#
+# systemd has no trailing comments: in "Key=value  # note" the note becomes part
+# of the value and the setting is ignored with only a journal warning. Keep
+# every comment on its own line (tests/test_deploy_units.py checks this).
 [Unit]
 Description=Nightly bids-assistant refresh
 
 [Timer]
-OnCalendar=*-*-* 03:30:00
-Persistent=true            # run on next boot if the box was off at 03:30
-RandomizedDelaySec=600     # jitter to avoid a fixed-time API burst
+# 03:30 UTC nightly. The zone is spelled out so the healthchecks.io schedule can
+# mirror this line whatever the box's time zone is; change both together.
+OnCalendar=*-*-* 03:30:00 UTC
+# Run on next boot if the box was off at 03:30.
+Persistent=true
+# Jitter (seconds) to avoid a fixed-time API burst.
+RandomizedDelaySec=600
 
 [Install]
 WantedBy=timers.target
