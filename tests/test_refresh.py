@@ -1,11 +1,12 @@
-"""refresh.sh and hc_ping.sh end to end in a throwaway repo: the real scripts
-(copied) with python, curl, journalctl, sudo, systemctl and package_index.sh
+"""refresh.sh, hc_ping.sh and package_index.sh end to end in a throwaway repo:
+the real scripts (copied) with python, curl, journalctl, sudo, systemctl and gh
 replaced by one recording stub — no network, no real index, no service restart."""
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tarfile
 import time
 from pathlib import Path
 
@@ -28,7 +29,12 @@ RUN_ID = "0123456789abcdef0123456789abcdef"   # the shape of systemd's $INVOCATI
 #   envpy             ENV_PY stand-in: -m src.checkouts / -m src.ingest (writes a
 #                     manifest into $BIDS_INDEX_PATH) / "- <staging>" (the stdin-fed
 #                     validation heredoc, handed to the real interpreter)
-#   package_index.sh  records its args and the GH_TOKEN it was given
+#   package_index.sh  records its args and the GH_TOKEN it was given (refresh.sh
+#                     tests; the package_index.sh tests swap in the real script)
+#   gh                answers --version like the real CLI and records the rest;
+#                     $FAKE_GH_RC is the status of `gh release upload`
+#   tar               (only when a test asks for it) writes a partial archive
+#                     and fails
 #   curl              like real curl, reads stdin only when asked to (@-)
 #   journalctl        prints $FAKE_JOURNAL
 #   sudo, systemctl   record only (nothing is restarted)
@@ -51,7 +57,20 @@ case "$name" in
     esac ;;
   package_index.sh)
     echo "$name $* GH_TOKEN=${GH_TOKEN:-<unset>}" >> "$STUB_LOG"
-    exit "${FAKE_PUBLISH_RC:-0}" ;;
+    case "${1:-}" in
+      "") exit "${FAKE_PACKAGE_RC:-0}" ;;              # build the tarball
+      --upload-only) exit "${FAKE_PUBLISH_RC:-0}" ;;   # publish it
+      *) exit 98 ;;
+    esac ;;
+  gh)
+    echo "$name $*" >> "$STUB_LOG"
+    case "${1:-} ${2:-}" in
+      "--version "*) echo "gh version 2 (https://github.com/cli/cli/releases)" ;;
+      "release upload") exit "${FAKE_GH_RC:-0}" ;;
+    esac ;;
+  tar)
+    echo "truncated archive" > "$2"
+    exit 2 ;;
   curl)
     echo "$name $*" >> "$STUB_LOG"
     case " $* " in *"@-"*) cat >> "$STUB_LOG.curl-stdin" ;; esac
@@ -82,6 +101,7 @@ class Sandbox:
 
     def __init__(self, root: Path, stub: Path):
         self.root, self.repo, self.log = root, root / "repo", root / "calls.log"
+        self._stub = stub
         (self.repo / "scripts").mkdir(parents=True)
         (self.repo / "bin").mkdir()
         for name in ("refresh.sh", "hc_ping.sh"):
@@ -96,6 +116,10 @@ class Sandbox:
     @property
     def manifest(self) -> Path:
         return self.repo / "index" / "manifest.json"
+
+    def fake(self, name: str):
+        """Put one more stubbed command on PATH."""
+        (self.repo / "bin" / name).symlink_to(self._stub)
 
     def dotenv(self, text: str):
         (self.repo / ".env").write_text(text)
@@ -162,7 +186,7 @@ def test_scripts_are_executable():
     assert os.access(SCRIPTS / "hc_ping.sh", os.X_OK)           # systemd execs both directly
 
 
-def test_green_run_swaps_restarts_and_publishes(sandbox):
+def test_green_run_swaps_packages_restarts_and_publishes(sandbox):
     r = sandbox.run()
     assert r.returncode == 0, r.stderr
     assert json.loads(sandbox.manifest.read_text()) == NEW
@@ -172,8 +196,9 @@ def test_green_run_swaps_restarts_and_publishes(sandbox):
         "python -m src.checkouts",
         "python -m src.ingest BIDS_INDEX_PATH=index.staging",
         "python - index.staging",                               # the validation heredoc
+        "package_index.sh  GH_TOKEN=<unset>",                   # tarball BEFORE the restart
         "sudo systemctl restart sandbox-svc",
-        "package_index.sh --upload GH_TOKEN=<unset>",
+        "package_index.sh --upload-only GH_TOKEN=<unset>",
     ]
     assert "staging OK: 305 chunks, built new" in r.stdout
     assert r.stdout.endswith("done.\n")
@@ -219,31 +244,59 @@ def test_no_live_index_errors_out(sandbox):
     assert sandbox.calls() == []                                # stopped before doing anything
 
 
-def test_publish_failure_is_only_a_warning(sandbox):
+def test_publish_failure_fails_the_run_after_everything_else(sandbox):
     r = sandbox.run(FAKE_PUBLISH_RC=1)
-    assert r.returncode == 0                                    # today's contract: non-fatal
-    assert "WARNING: asset publish failed" in r.stdout
-    assert json.loads(sandbox.manifest.read_text()) == NEW      # the live index is current
+    assert r.returncode == 3                                    # reported, not swallowed
+    assert "ERROR: asset publish failed" in r.stdout
+    assert "FAILED after the swap: publish." in r.stdout
+    assert "done." not in r.stdout
+    assert json.loads(sandbox.manifest.read_text()) == NEW      # the refresh itself landed
+    assert "sudo systemctl restart sandbox-svc" in sandbox.calls()
+
+
+def test_package_failure_still_restarts_and_skips_the_upload(sandbox):
+    r = sandbox.run(FAKE_PACKAGE_RC=1)
+    assert r.returncode == 3 and "FAILED after the swap: package." in r.stdout
+    assert json.loads(sandbox.manifest.read_text()) == NEW
+    assert sandbox.calls()[-1] == "sudo systemctl restart sandbox-svc"   # no upload
+
+
+def test_restart_failure_still_publishes_then_fails(sandbox):
+    r = sandbox.run(FAKE_SUDO_RC=1)
+    assert r.returncode == 3 and "FAILED after the swap: restart." in r.stdout
+    assert json.loads(sandbox.manifest.read_text()) == NEW      # no rollback
+    assert sandbox.calls()[-1].startswith("package_index.sh --upload-only")
+
+
+def test_every_step_after_the_swap_can_fail_and_all_are_named(sandbox):
+    r = sandbox.run(FAKE_SUDO_RC=1, FAKE_PUBLISH_RC=1)
+    assert r.returncode == 3 and "FAILED after the swap: restart publish." in r.stdout
+
+
+def test_skip_publish_neither_packages_nor_uploads(sandbox):
+    r = sandbox.run(SKIP_PUBLISH=1, FAKE_PACKAGE_RC=1, FAKE_PUBLISH_RC=1)
+    assert r.returncode == 0, r.stdout                          # the opt-out really opts out
+    assert not any(c.startswith("package_index.sh") for c in sandbox.calls())
 
 
 def test_publish_token_prefers_gh_publish_token(sandbox):
     sandbox.dotenv("# comment\nGITHUB_TOKEN=read\nGH_PUBLISH_TOKEN='pub'\n")
     assert sandbox.run().returncode == 0
-    assert "package_index.sh --upload GH_TOKEN=pub" in sandbox.calls()   # quotes stripped
+    assert "package_index.sh --upload-only GH_TOKEN=pub" in sandbox.calls()   # quotes stripped
 
 
 def test_publish_token_falls_back_to_github_token(sandbox):
     sandbox.dotenv("GITHUB_TOKEN = read\r\n")                   # no GH_PUBLISH_TOKEN; spaces, CR
     r = sandbox.run()
     assert r.returncode == 0, r.stdout + r.stderr               # used to abort: exit 1, no output
-    assert "package_index.sh --upload GH_TOKEN=read" in sandbox.calls()
+    assert "package_index.sh --upload-only GH_TOKEN=read" in sandbox.calls()
     assert b"GH_TOKEN=read\n" in sandbox.log.read_bytes()       # and no stray CR on it
 
 
 def test_dotenv_without_any_token_still_runs(sandbox):
     sandbox.dotenv("OPENAI_API_KEY=sk-test\n")
     assert sandbox.run().returncode == 0
-    assert "package_index.sh --upload GH_TOKEN=<unset>" in sandbox.calls()
+    assert "package_index.sh --upload-only GH_TOKEN=<unset>" in sandbox.calls()
 
 
 def test_no_dotenv_still_runs(sandbox):
@@ -254,7 +307,88 @@ def test_no_dotenv_still_runs(sandbox):
 def test_exported_gh_token_wins_over_dotenv(sandbox):
     sandbox.dotenv("GH_PUBLISH_TOKEN=pub\n")
     assert sandbox.run(GH_TOKEN="shell").returncode == 0
-    assert "package_index.sh --upload GH_TOKEN=shell" in sandbox.calls()
+    assert "package_index.sh --upload-only GH_TOKEN=shell" in sandbox.calls()
+
+
+# --- package_index.sh (the real script; gh stubbed) ------------------------
+
+def _real_package_script(sandbox):
+    (sandbox.repo / "scripts" / "package_index.sh").unlink()    # replace the stub
+    shutil.copy(SCRIPTS / "package_index.sh", sandbox.repo / "scripts")
+    sandbox.fake("gh")                                          # first on PATH: a real gh is never reached
+    (sandbox.repo / "bin" / "python3").symlink_to(sys.executable)   # it prints the manifest
+
+
+def test_plain_package_builds_the_tarball_and_uploads_nothing(sandbox):
+    _real_package_script(sandbox)
+    r = sandbox.run("package_index.sh")
+    assert r.returncode == 0, r.stderr
+    assert (sandbox.repo / "dist" / "index.tgz").stat().st_size > 0
+    assert not (sandbox.repo / "dist" / "index.tgz.tmp").exists()   # built, then renamed
+    assert sandbox.calls() == []                                # gh never called
+
+
+def test_upload_builds_then_publishes(sandbox):
+    _real_package_script(sandbox)
+    r = sandbox.run("package_index.sh", "--upload")
+    assert r.returncode == 0, r.stderr
+    assert f"using GitHub CLI: {sandbox.repo / 'bin' / 'gh'}" in r.stdout   # the stub
+    assert (sandbox.repo / "dist" / "index.tgz").stat().st_size > 0
+    assert sandbox.calls()[-1] == "gh release upload index-latest dist/index.tgz --clobber"
+
+
+def test_upload_only_publishes_the_existing_tarball_untouched(sandbox):
+    _real_package_script(sandbox)
+    (sandbox.repo / "dist").mkdir()
+    (sandbox.repo / "dist" / "index.tgz").write_text("snapshot taken before the restart")
+    r = sandbox.run("package_index.sh", "--upload-only")
+    assert r.returncode == 0, r.stderr
+    assert (sandbox.repo / "dist" / "index.tgz").read_text().startswith("snapshot")  # no re-tar
+    assert sandbox.calls()[-1] == "gh release upload index-latest dist/index.tgz --clobber"
+
+
+def test_upload_only_without_a_tarball_fails(sandbox):
+    _real_package_script(sandbox)
+    r = sandbox.run("package_index.sh", "--upload-only")
+    assert r.returncode == 1 and "no dist/index.tgz" in r.stderr
+    assert sandbox.calls() == []                                # gh never called
+
+
+def test_a_failed_upload_fails_the_script(sandbox):
+    _real_package_script(sandbox)
+    r = sandbox.run("package_index.sh", "--upload", FAKE_GH_RC=1)
+    assert r.returncode == 1                                    # what refresh.sh turns into exit 3
+    assert sandbox.calls()[-1].startswith("gh release upload")  # it got as far as the upload
+
+
+def test_a_failed_tar_keeps_the_previous_tarball(sandbox):
+    _real_package_script(sandbox)
+    sandbox.fake("tar")
+    (sandbox.repo / "dist").mkdir()
+    (sandbox.repo / "dist" / "index.tgz").write_text("last good snapshot")
+    r = sandbox.run("package_index.sh")
+    assert r.returncode != 0
+    assert (sandbox.repo / "dist" / "index.tgz").read_text() == "last good snapshot"
+
+
+def test_refresh_with_the_real_package_script_publishes_the_new_index(sandbox):
+    _real_package_script(sandbox)
+    r = sandbox.run()
+    assert r.returncode == 0, r.stdout + r.stderr
+    calls = sandbox.calls()
+    assert calls[-1] == "gh release upload index-latest dist/index.tgz --clobber"
+    restart = calls.index("sudo systemctl restart sandbox-svc")
+    assert not any(c.startswith("gh") for c in calls[:restart])   # upload only after it
+    with tarfile.open(sandbox.repo / "dist" / "index.tgz") as tar:
+        packed = json.load(tar.extractfile("index/manifest.json"))
+    assert packed == NEW                                        # the swapped-in index
+
+
+def test_refresh_with_the_real_package_script_reports_a_failed_upload(sandbox):
+    _real_package_script(sandbox)
+    r = sandbox.run(FAKE_GH_RC=1)                               # e.g. an expired token
+    assert r.returncode == 3 and "FAILED after the swap: publish." in r.stdout
+    assert json.loads(sandbox.manifest.read_text()) == NEW
 
 
 # --- hc_ping.sh ------------------------------------------------------------
@@ -419,6 +553,15 @@ def test_unit_ingest_failure_pings_its_exit_status(sandbox):
     assert sandbox.pings() == [f"{URL}/start", f"{URL}/7"]
     assert "Traceback: boom" in sandbox.body() and "FAILED: exit 7" in sandbox.body()
     assert json.loads(sandbox.manifest.read_text()) == OLD      # live index untouched
+
+
+def test_unit_publish_failure_pings_exit_3(sandbox):
+    sandbox.dotenv(f"HEALTHCHECK_URL={URL}\n")
+    r = sandbox.run_unit(FAKE_PUBLISH_RC=1)
+    assert r.returncode == 3
+    assert sandbox.pings() == [f"{URL}/start", f"{URL}/3"]      # an alert, not a success
+    assert "FAILED after the swap: publish." in sandbox.body()  # the e-mail says which step
+    assert json.loads(sandbox.manifest.read_text()) == NEW      # the refresh itself landed
 
 
 def test_unit_without_a_url_refreshes_and_pings_nothing(sandbox):

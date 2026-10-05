@@ -185,8 +185,10 @@ journalctl -u bids-assistant-refresh.service -n 40     # read the last run's log
 The timer fires at 03:30 UTC plus up to 10 min of jitter, and catches up at the
 next boot if the box was off at that time. Adjust the cadence in the `.timer`
 (`OnCalendar=`); nightly is cheap since ingest is incremental. Runs are logged
-to the journal. A failed refresh leaves the live index untouched (it only swaps
-a validated staging build).
+to the journal. A refresh that fails before the swap (checkouts, ingest,
+validation) leaves the live index untouched — it only swaps a validated staging
+build. Exit status **3** means the new index is live but the app restart or the
+asset publish failed.
 
 **Monitoring — an e-mail when the nightly refresh fails or stops running.**
 Optional; inert until configured. The unit reports every run to
@@ -195,9 +197,10 @@ Optional; inert until configured. The unit reports every run to
 journal (values from `.env` and token-shaped strings are redacted before it
 leaves the box). A failed step, a timeout or an OOM kill alerts at once; a run
 that never happens (timer off, box down) alerts when no ping arrives in time.
-Two limits: only runs started through systemd are reported (a hand-run
-`scripts/refresh.sh` is not), and an asset-publish failure is still only a
-`WARNING` in the log and is reported as a success.
+A failed asset publish or app restart is reported too (exit status 3: the new
+index is live, but the downloadable copy or the running app is stale). One
+limit: only runs started through systemd are reported (a hand-run
+`scripts/refresh.sh` is not).
 
 1. **Create the check** at healthchecks.io: schedule **Cron** `30 3 * * *`, time
    zone **UTC** (it mirrors the timer's `OnCalendar=`; change both together),
@@ -242,10 +245,15 @@ different tokens, because publishing needs write access and harvesting doesn't:
   only if it's unset.
 
 So keep your read-only `GITHUB_TOKEN` and **add a second line** to the server's
-`.env`: `GH_PUBLISH_TOKEN=...` with the write token. If you skip it, the publish
-step just warns and the live index is current regardless (or set `SKIP_PUBLISH=1`
-and publish from a maintainer machine). `gh` must be installed on the box for
-this step (the tester `fetch_index.sh` path uses plain `curl` and needs no `gh`).
+`.env`: `GH_PUBLISH_TOKEN=...` with the write token. If you skip it, `refresh.sh`
+falls back to `GITHUB_TOKEN`; with a read-only token the index is still
+refreshed, but the publish fails and the run ends with exit status 3, which the
+monitoring reports as a failure. `gh` must be installed on the box for this step
+(the tester `fetch_index.sh` path uses plain `curl` and needs no `gh`).
+
+To not publish from this box at all, run
+`sudo systemctl edit bids-assistant-refresh.service`, add `Environment=SKIP_PUBLISH=1`
+under `[Service]`, and publish from a maintainer machine instead.
 
 **Manual (fallback / one-off):** rebuild elsewhere and pull the published asset:
 

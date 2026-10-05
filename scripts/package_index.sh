@@ -8,6 +8,8 @@
 #
 #   scripts/package_index.sh                 # build dist/index.tgz only
 #   scripts/package_index.sh --upload [tag]  # build + publish (default tag: index-latest)
+#   scripts/package_index.sh --upload-only [tag]   # publish the dist/index.tgz already built
+#                                            # (refresh.sh builds before the app restart, uploads after)
 #
 # Publishing needs the `gh` CLI authenticated (`gh auth login`). --clobber
 # replaces the asset in place, so re-running after a re-ingest just updates it.
@@ -30,23 +32,35 @@ find_gh() {
   return 1
 }
 
-if [ ! -f index/manifest.json ]; then
-  echo "error: no index/manifest.json — build the index first: python -m src.ingest" >&2
-  exit 1
-fi
+MODE="${1:-}"
 
-mkdir -p dist
-tar czf "$TARBALL" index/
-echo "built $TARBALL ($(du -h "$TARBALL" | cut -f1))"
-python3 - <<'PY'
+if [ "$MODE" = "--upload-only" ]; then
+  if [ ! -f "$TARBALL" ]; then
+    echo "error: no $TARBALL to upload — run scripts/package_index.sh first." >&2
+    exit 1
+  fi
+else
+  if [ ! -f index/manifest.json ]; then
+    echo "error: no index/manifest.json — build the index first: python -m src.ingest" >&2
+    exit 1
+  fi
+
+  mkdir -p dist
+  # Build under a temp name, then rename: a failed or killed tar must never leave
+  # a truncated dist/index.tgz behind for a later --upload-only to publish.
+  tar czf "$TARBALL.tmp" index/
+  mv "$TARBALL.tmp" "$TARBALL"
+  echo "built $TARBALL ($(du -h "$TARBALL" | cut -f1))"
+  python3 - <<'PY'
 import json
 m = json.load(open("index/manifest.json"))
 print(f"  embedding model: {m.get('embedding_model')}")
 print(f"  built_at:        {m.get('built_at')}")
 print(f"  chunks:          {m.get('chunks')}")
 PY
+fi
 
-if [ "${1:-}" = "--upload" ]; then
+if [ "$MODE" = "--upload" ] || [ "$MODE" = "--upload-only" ]; then
   TAG="${2:-index-latest}"
   TITLE="Prebuilt index ($(date -u +%Y-%m-%d))"
   NOTES="Prebuilt bids-assistant index for maintainer testing. Fetch with scripts/fetch_index.sh. This is a build artifact and may be replaced or removed at any time."
