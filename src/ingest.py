@@ -185,6 +185,13 @@ def sync_neurostars(config, store, old_bumped: dict, full: bool) -> dict:
                                   "ns_topic_id": tid})
                 _add_chunks(store, [rec], size, overlap)
                 changed += 1
+        if not full and prev and not current:
+            # Every listing for this app came back empty, yet last time it had
+            # topics. A 404 or an empty page on the tag listing looks exactly
+            # like that, and pruning on it would wipe the app's whole corpus.
+            raise RuntimeError(
+                f"{app} neurostars: tag listing returned no topics but the previous "
+                f"manifest has {len(prev)}; refusing to prune them")
         if not full:
             for gone in set(prev) - set(current):
                 store.delete({"app": app, "source": "neurostars",

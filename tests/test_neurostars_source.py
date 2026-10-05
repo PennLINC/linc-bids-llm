@@ -1,3 +1,5 @@
+import pytest
+
 from src.sources import neurostars_source as ns
 
 
@@ -79,3 +81,21 @@ def test_fetch_posts_drains_stream_and_drops_mod_actions(monkeypatch):
     posts = ns.fetch_posts(999)
     assert [p["post_number"] for p in posts] == [1, 3]      # mod action dropped
     assert calls[1][1] == {"post_ids[]": [103]}             # only missing id fetched
+
+
+def test_get_raises_when_rate_limited_on_every_attempt(monkeypatch, resp):
+    calls = []
+    monkeypatch.setattr(ns.requests, "get", lambda url, **kw: calls.append(url) or
+                        resp(429, headers={"Retry-After": "1"}))
+    with pytest.raises(RuntimeError, match="rate-limited"):
+        ns._get("/tag/qsiprep/l/latest.json", page=0)
+    assert len(calls) == 4                                  # all retries spent, then raised
+    # A listing must not mistake it for "no more topics" either: the error propagates.
+    with pytest.raises(RuntimeError):
+        ns.list_topics("qsiprep")
+
+
+def test_get_returns_none_only_on_404(monkeypatch, resp):
+    monkeypatch.setattr(ns.requests, "get", lambda url, **kw: resp(404))
+    assert ns._get("/t/999.json") is None
+    assert ns.list_topics("no-such-tag") == []              # 404 on the tag: empty, no error
