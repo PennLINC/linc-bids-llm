@@ -5,7 +5,10 @@
              halves agree on). Answer from it in one cheap call.
   agent    : novel traceback / code question — needs the tool loop (grep the
              version the user ran, read the raising code). This is the default
-             for anything not clearly FAQ-shaped.
+             for anything not clearly FAQ-shaped, and for every follow-up turn
+             in a chat: the one-shot path takes no history, so a short
+             follow-up ("why?", "which of those should I use?") routed there
+             would be answered from chunks retrieved for the bare text alone.
 
 Heuristics are intentionally cheap and legible; Stage 6 eval calibrates them.
 """
@@ -46,11 +49,16 @@ def scope(config: dict, app: str) -> list[str]:
     return [app, *neighbors]
 
 
-def route(question: str, store, config: dict, app: str) -> Decision:
-    """Pick a path. Pasted tracebacks and long dumps always go agentic; short
-    questions go one-shot only on a high-confidence FAQ match."""
+def route(question: str, store, config: dict, app: str,
+          history: list | None = None) -> Decision:
+    """Pick a path. Pasted tracebacks and long dumps always go agentic, as does
+    any turn with prior chat `history` (the agent is the only path that reads
+    it); short first-turn questions go one-shot only on a high-confidence FAQ
+    match. Agent decisions carry no chunks — the agent runs its own searches."""
     if looks_like_traceback(question) or is_long_paste(question):
         return Decision("agent", [], "contains a traceback / long paste")
+    if history:
+        return Decision("agent", [], "follow-up turn; needs chat context")
 
     chunks = store.hybrid_query(
         question, k=config["retrieval"]["top_k"],

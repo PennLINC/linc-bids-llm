@@ -159,7 +159,7 @@ def answer_turn(question: str, app: str, mode: str, config: dict, store,
     elif mode == "Agent":
         decision = router_mod.Decision("agent", [], "forced (sidebar)")
     else:
-        decision = router_mod.route(question, store, config, app)
+        decision = router_mod.route(question, store, config, app, history=history)
 
     msg = {"role": "assistant", "route_path": decision.path,
            "route_reason": decision.reason}
@@ -232,7 +232,8 @@ with st.sidebar:
     st.warning(DISCLAIMER)          # TEMPORARY (testing phase)
     mode = st.radio("Answer mode", ["Auto", "One-shot", "Agent"], horizontal=True,
                     help="Auto routes FAQ-shaped questions to a fast one-shot "
-                         "answer and tracebacks/code questions to the agent.")
+                         "answer, and tracebacks, code questions and follow-ups "
+                         "in a chat to the agent (only the agent sees history).")
     st.divider()
     st.markdown(
         f"**Index built:** {manifest.get('built_at', '?')}\n\n"
