@@ -146,9 +146,12 @@ in `deploy/`, re-install them:
 ```bash
 sudo cp deploy/bids-assistant-refresh.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl restart bids-assistant-refresh.timer
 systemd-analyze verify /etc/systemd/system/bids-assistant-refresh.{service,timer}   # prints nothing when clean
 ```
+
+`daemon-reload` re-reads the timer and re-arms it with the new settings, so the
+timer itself needs no restart (on a systemd older than 255.4-1ubuntu8.15, a
+restart would start a refresh at once).
 
 ## 7. Refreshing the index + checkouts
 
@@ -205,8 +208,13 @@ Two limits: only runs started through systemd are reported (a hand-run
    the check — so it lives only in `.env`, never in the unit file:
 
    ```bash
-   printf 'HEALTHCHECK_URL=https://hc-ping.com/<uuid>\n' >> .env && chmod 600 .env
+   printf '\nHEALTHCHECK_URL=https://hc-ping.com/<uuid>\n' >> .env && chmod 600 .env
+   grep -c '^HEALTHCHECK_URL=' .env   # must print 1
    ```
+
+   The leading `\n` keeps the line from being glued onto the last key if `.env`
+   has no final newline. The first `HEALTHCHECK_URL` line wins, so to change the
+   URL later edit that line in place rather than appending another.
 
 3. **Install the updated units** (§6), then prove it end to end:
 

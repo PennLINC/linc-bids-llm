@@ -98,8 +98,10 @@ utf8() {
 case "${1:-}" in
   start)
     # One short attempt: this runs before the refresh and must not hold it up.
+    # (-g: no URL globbing — with it, a stray [ ] { } in the URL makes curl
+    # print the whole URL in its error message.)
     suffix="/start"
-    curl -fsS -m 10 -o /dev/null --data-raw '' "$URL$suffix"
+    curl -gfsS -m 10 -o /dev/null --data-raw '' "$URL$suffix"
     rc=$?
     ;;
   result)
@@ -119,12 +121,13 @@ case "${1:-}" in
       esac
     fi
     # Body: systemd's verdict, then the scrubbed log tail — under 10 kB in all,
-    # which is what the alert e-mail shows.
+    # which is what the alert e-mail shows. Scrub BEFORE tail -c: a token cut in
+    # half loses the prefix the scrub rules match on.
     {
       echo "bids-assistant refresh: result=$res $code=$st"
       journal_tail | scrub | tail -c 8000
     } | utf8 \
-      | curl -fsS -m 10 --retry 3 --retry-max-time 30 -o /dev/null \
+      | curl -gfsS -m 10 --retry 3 --retry-max-time 30 -o /dev/null \
           --data-binary @- "$URL$suffix"
     rc=$?
     ;;
