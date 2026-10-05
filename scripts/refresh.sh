@@ -22,6 +22,9 @@
 #   SKIP_CHECKOUTS=1  skip the checkout update (faster; for testing)
 #   SKIP_RESTART=1    don't restart the service (auto-skipped when systemctl absent)
 #   SKIP_PUBLISH=1    don't re-publish the index release asset
+#   ALLOW_SHRINK=1    swap in a staging index even if a source lost >20% of its
+#                     chunks (validation refuses that by default: a harvest that
+#                     failed quietly looks like a corpus that shrank)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -74,14 +77,35 @@ cp -a "$INDEX" "$STAGING"
 log "incremental ingest into staging..."
 BIDS_INDEX_PATH="$STAGING" "$ENV_PY" -m src.ingest
 
-# 3. validate the staging index before we trust it.
+# 3. validate the staging index before we trust it. Besides "not empty", compare
+#    per-source chunk counts with the live manifest: a source that lost a large
+#    share of its chunks is almost always a harvest that failed quietly (a
+#    rate-limited or 404'd NeuroStars listing reads as "no topics" and every
+#    topic not seen gets pruned), not a corpus that shrank. Docs + issues keep
+#    the total well above zero, so the total alone never catches it.
 log "validating staging index..."
-"$ENV_PY" - "$STAGING" <<'PY'
-import json, sys, pathlib
-staging = pathlib.Path(sys.argv[1])
+"$ENV_PY" - "$STAGING" "$INDEX" <<'PY'
+import json, os, sys, pathlib
+staging, live = (pathlib.Path(p) for p in sys.argv[1:3])
 m = json.loads((staging / "manifest.json").read_text())
-n = sum(m.get("chunks", {}).values())
+new = m.get("chunks", {})
+n = sum(new.values())
 assert n > 0, "staging index is empty"
+
+MIN_CHUNKS, MAX_LOSS = 50, 0.20   # sources under MIN_CHUNKS may shrink freely
+old = json.loads((live / "manifest.json").read_text()).get("chunks", {})
+shrunk = [(src, old[src], new.get(src, 0)) for src in sorted(old)
+          if old[src] >= MIN_CHUNKS and new.get(src, 0) < old[src] * (1 - MAX_LOSS)]
+for src, was, now in shrunk:
+    print(f"  {src}: {was} -> {now} chunks ({(was - now) * 100 // was}% lost)",
+          file=sys.stderr)
+if shrunk and os.environ.get("ALLOW_SHRINK") != "1":
+    names = ", ".join(f"{src} {was} -> {now}" for src, was, now in shrunk)
+    sys.exit(f"error: staging index shrank: {names} chunks (limit {MAX_LOSS:.0%} of a "
+             f"source with {MIN_CHUNKS}+ chunks). Looks like a failed harvest; the "
+             "live index is kept. Re-run with ALLOW_SHRINK=1 if the shrink is genuine.")
+if shrunk:
+    print("  WARNING: ALLOW_SHRINK=1 set; swapping in the shrunken index anyway.")
 print(f"  staging OK: {n} chunks, built {m.get('built_at')}")
 PY
 

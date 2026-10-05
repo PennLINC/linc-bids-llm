@@ -24,7 +24,13 @@ MIN_REPLY_CHARS = 25  # drop "thanks!" / "+1" replies
 
 
 def _get(path: str, **params) -> dict | None:
-    """GET a Discourse JSON endpoint; None on 404."""
+    """GET a Discourse JSON endpoint; None on 404, raises once retries run out.
+
+    None means "this path does not exist" and nothing else: a listing caller
+    reads it as the end of the tag. Transient trouble (429 after every retry,
+    5xx, a dropped connection) must raise instead, or an incremental sync
+    would mistake a rate-limited listing for an empty tag and prune it.
+    """
     headers = {"User-Agent": common.user_agent()}
     for attempt in range(4):
         try:
@@ -48,6 +54,9 @@ def _get(path: str, **params) -> dict | None:
             continue
         resp.raise_for_status()
         return resp.json()
+    # Still rate-limited after the last retry. Returning None here would read as
+    # "404 / end of listing" and the sync would prune every topic it didn't see.
+    raise RuntimeError(f"NeuroStars: still rate-limited on {path} after 4 tries")
 
 
 # --- HTML -> text ----------------------------------------------------------

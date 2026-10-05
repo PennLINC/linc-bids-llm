@@ -1,5 +1,7 @@
 """Incremental sync: docs by tag-sha, issues by updated_at, neurostars by
 bumped_at. Sources are monkeypatched; the store is a recording fake."""
+import pytest
+
 from src import ingest
 from src.sources import docs_source, issues_source, neurostars_source
 
@@ -111,3 +113,31 @@ def test_sync_neurostars_full_fetches_all(config, monkeypatch):
     ingest.sync_neurostars(config, store, {"qsiprep": {"1": "b1"}}, full=True)
     assert fetched == [1]              # full mode ignores the unchanged bumped_at
     assert store.deleted == []
+
+
+def test_sync_neurostars_refuses_to_prune_on_an_empty_listing(config, monkeypatch):
+    # A 404 or a bare page on the tag listing comes back as [] — the same as a
+    # tag with no topics. With topics in the previous manifest that is a failed
+    # harvest, not an emptied tag: raise, and delete nothing.
+    monkeypatch.setattr(neurostars_source, "list_topics", lambda tag: [])
+    monkeypatch.setattr(neurostars_source, "fetch_posts",
+                        lambda tid: pytest.fail("nothing to fetch"))
+    store = FakeStore()
+    old = {"qsiprep": {"1": "2026-01-01T00:00:00Z", "2": "2026-06-01T00:00:00Z"}}
+    with pytest.raises(RuntimeError, match="refusing to prune"):
+        ingest.sync_neurostars(config, store, old, full=False)
+    assert store.deleted == [] and store.added == []
+
+
+def test_sync_neurostars_empty_is_fine_without_previous_topics(config, monkeypatch):
+    # qsiplan-style apps (no tags, nothing indexed) and a first harvest of a
+    # tag that is still empty must keep working.
+    config["apps"]["qsiplan"] = {**config["apps"]["qsiprep"], "neurostars_tags": []}
+    monkeypatch.setattr(neurostars_source, "list_topics", lambda tag: [])
+    store = FakeStore()
+    old = {"qsiprep": {}, "qsiplan": {}}
+    new_bumped = ingest.sync_neurostars(config, store, old, full=False)
+    assert new_bumped == {"qsiprep": {}, "qsiplan": {}}
+    assert store.deleted == []
+    # a full rebuild never prunes, so it never refuses either
+    ingest.sync_neurostars(config, store, {"qsiprep": {"1": "b1"}}, full=True)

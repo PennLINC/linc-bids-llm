@@ -186,7 +186,10 @@ The timer fires at 03:30 UTC plus up to 10 min of jitter, and catches up at the
 next boot if the box was off at that time. Adjust the cadence in the `.timer`
 (`OnCalendar=`); nightly is cheap since ingest is incremental. Runs are logged
 to the journal. A failed refresh leaves the live index untouched (it only swaps
-a validated staging build).
+a validated staging build). Validation also refuses a build in which any source
+with 50+ chunks lost more than 20% of them — a NeuroStars listing that was
+rate-limited or 404'd looks like an emptied tag and would otherwise prune the
+whole corpus — so a genuine shrink needs `ALLOW_SHRINK=1 scripts/refresh.sh`.
 
 The one exception is exit status **3**: the new index is live, but the app
 restart or the asset publish failed after the swap.
