@@ -8,6 +8,7 @@ historical fixes — these references are maintainer-verified current truth.
 
     python -m eval.feedback_to_cases            # merge into eval/regression.json
     python -m eval.feedback_to_cases --local    # include your local .feedback log
+    python -m eval.feedback_to_cases --log .feedback/server.jsonl   # hosted app's log
 
 A case needs a query and either a correct_url (for retrieval scoring) or a
 comment/answer reference (for answer scoring); entries with neither are skipped.
@@ -17,13 +18,17 @@ import hashlib
 import json
 from pathlib import Path
 
-from eval.feedback_report import LOCAL_LOG, FEEDBACK_DIR, load_entries
+from eval.feedback_report import add_source_args, collect
+from eval.urls import canon_url
 
 REGRESSION = Path("eval/regression.json")
 
 
 def _case_id(entry: dict) -> str:
-    key = (entry.get("question", "") + "|" + (entry.get("correct_url") or "")).encode()
+    # canonical URL, so the same thread pasted in two forms is still one case;
+    # app, so the same question on two tools' cards is two
+    key = "|".join((entry.get("app") or "", entry.get("question", ""),
+                    canon_url(entry.get("correct_url") or ""))).encode()
     return "fb-" + hashlib.sha1(key).hexdigest()[:12]
 
 
@@ -49,6 +54,11 @@ def entries_to_cases(entries: list[dict]) -> list[dict]:
             "query": query,
             "reference": reference,
             "category": e.get("category"),
+            # what the judge needs to tell "fixed" from "same mistake again",
+            # and what a follow-up turn needs to be replayed in context
+            "rated_path": e.get("path"),
+            "flagged_answer": e.get("answer") or "",
+            "history": e.get("history") or [],
         }
     return list(cases.values())
 
@@ -63,14 +73,11 @@ def merge_cases(existing: list[dict], new: list[dict]) -> list[dict]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--local", action="store_true")
+    add_source_args(ap)
     ap.add_argument("--out", default=str(REGRESSION))
     args = ap.parse_args()
 
-    paths = sorted(FEEDBACK_DIR.glob("*.jsonl"))
-    if args.local:
-        paths.append(LOCAL_LOG)
-    new = entries_to_cases(load_entries(paths))
+    new = entries_to_cases(collect(args))
 
     out = Path(args.out)
     existing = json.loads(out.read_text()) if out.exists() else []

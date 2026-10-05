@@ -1,7 +1,7 @@
 """Feedback aggregation + promotion to regression cases (pure logic)."""
 import json
 
-from eval.feedback_report import load_entries, summarize
+from eval.feedback_report import load_entries, prepare, summarize
 from eval.feedback_to_cases import entries_to_cases, merge_cases, _case_id
 
 
@@ -93,6 +93,61 @@ def test_case_id_stable_and_query_url_keyed():
     b = {"question": "q", "correct_url": "u", "comment": "different"}
     assert _case_id(a) == _case_id(b)                      # id ignores comment
     assert _case_id(a) != _case_id({"question": "q", "correct_url": "v"})
+
+
+def test_case_id_ignores_url_form_but_separates_apps():
+    a = {"app": "qsiprep", "question": "q",
+         "correct_url": "https://neurostars.org/t/slug/42"}
+    scrolled = {**a, "correct_url": "https://neurostars.org/t/slug/42/7"}
+    assert _case_id(a) == _case_id(scrolled)
+    assert _case_id(a) != _case_id({**a, "app": "aslprep"})
+
+
+def test_cases_carry_what_a_replay_needs():
+    history = [{"role": "user", "content": "first q"},
+               {"role": "assistant", "content": "first a"}]
+    case, = entries_to_cases([
+        {"rating": "down", "app": "qsiprep", "path": "agent", "question": "and on 1.0?",
+         "answer": "bad answer", "comment": "flag didn't exist yet", "history": history}])
+    assert case["flagged_answer"] == "bad answer"
+    assert case["history"] == history and case["rated_path"] == "agent"
+
+
+def test_prepare_keeps_one_entry_per_rated_answer():
+    click = {"rating": "down", "app": "qsiprep", "question": "q", "answer": "a"}
+    entries = prepare([
+        click, dict(click),                                  # double-click
+        {**click, "comment": "added the url", "correct_url": "u"},   # revised
+        {**click, "answer": "a different answer"},           # another answer: kept
+    ])
+    assert len(entries) == 2
+    assert entries[0]["correct_url"] == "u"                  # last click wins
+
+
+def test_prepare_keys_on_session_and_turn_once_logged():
+    base = {"rating": "down", "chat_id": "c1", "question": "q", "answer": "a"}
+    entries = prepare([
+        {**base, "session": "s1", "turn": 1},
+        {**base, "session": "s1", "turn": 1, "rating": "up"},   # same tester re-rates
+        {**base, "session": "s1", "turn": 2},                   # a later turn
+        {**base, "session": "s2", "turn": 1},                   # someone else's view
+    ])
+    assert [(e["session"], e["turn"], e["rating"]) for e in entries] == [
+        ("s1", 1, "up"), ("s1", 2, "down"), ("s2", 1, "down")]
+
+
+def test_prepare_counts_a_category_without_a_thumb_as_down():
+    entries = prepare([
+        {"rating": None, "category": "wrong version", "question": "q1", "answer": "a",
+         "comment": "described 0.7"},
+        {"rating": None, "category": None, "question": "q2", "answer": "a",
+         "comment": "just a remark"},
+    ])
+    s = summarize(entries)
+    assert s["down"] == 1 and s["implied"] == 1
+    assert [e["question"] for e in s["failures"]] == ["q1"]
+    assert [e["question"] for e in s["notes"]] == ["q2"]     # surfaced, not dropped
+    assert len(entries_to_cases(entries)) == 1               # and promoted
 
 
 def test_merge_cases_dedupes_and_updates():

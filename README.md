@@ -104,16 +104,20 @@ thread lands in the hybrid top-k. Latest scorecard (k=8):
 
 | method | hit@8 | MRR |
 |--------|-------|-----|
-| hybrid | 100%  | 0.974 |
-| vector-only | 96% | 0.410 |
-| bm25-only | 100% | 0.381 |
+| hybrid | 100%  | 0.973 |
+| vector-only | 96% | 0.934 |
+| bm25-only | 100% | 0.979 |
 
-The hit rates are high because the gold thread is itself indexed; the load-
-bearing number is **MRR**. Hybrid (0.974) ranks the gold thread ~1st almost
-always, while neither vector (0.41) nor BM25 (0.38) alone does — RRF fusion is
-what buys the ranking. Vector-only also misses 8% of issues (exact error
-strings) that BM25 catches. This is the regression gate for retrieval/prompt/
-model changes.
+The hit rates are high because the gold thread is itself indexed and the query
+is its own opening post — which also makes this set easy for BM25, since the
+query's exact tokens sit in the gold chunk. All three methods rank the gold
+thread ~1st. Hybrid's edge here is coverage, not rank: vector-only misses 8% of
+issues (exact error strings) that BM25 catches, and fusion keeps them. (An
+earlier scorecard put vector/BM25 MRR near 0.4; that was a scoring bug — the
+single-method lists were scored in storage order rather than rank order — not a
+property of retrieval.) Queries are scoped as the app scopes them: the app plus
+its pipeline neighbors. This is the regression gate for retrieval/prompt/model
+changes.
 
 ### Answer eval (`--answers N`) — use with caution
 

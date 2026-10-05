@@ -11,6 +11,7 @@ maintainers can see the assistant's work. Thumbs+comment feedback is logged to
 """
 import json
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -119,6 +120,16 @@ def feedback_block(app: str, state: dict, config: dict, manifest: dict) -> None:
             log_feedback({
                 "app": app,
                 "path": path,
+                "route_reason": messages[-1].get("route_reason"),  # auto vs forced
+                # Which answer this is, and for whom: the shared login has no
+                # users, so a random per-browser id is what tells one tester
+                # revising a rating from two testers rating the same chat.
+                "session": st.session_state.setdefault("sid", uuid.uuid4().hex[:8]),
+                "chat_id": state["id"],
+                "turn": sum(m["role"] == "assistant" for m in messages),
+                # A follow-up's question means little alone ("and on 1.0.0?");
+                # keep the turns the agent was given so the case can be replayed.
+                "history": agent_history(messages[:-2]),
                 "question": question,
                 "answer": answer_md,
                 "rating": {0: "down", 1: "up"}.get(rating),
@@ -128,8 +139,7 @@ def feedback_block(app: str, state: dict, config: dict, manifest: dict) -> None:
                 "index_built": manifest.get("built_at"),
                 **run_context(config, path),   # models/embed/commit provenance
             })
-            st.toast("Logged to .feedback/ — thanks! Submit with "
-                     "scripts/submit_feedback.sh")
+            st.toast("Feedback logged — thanks!")
         repo = (config.get("feedback") or {}).get("github_repo")
         if repo:
             st.link_button("Report on GitHub",
