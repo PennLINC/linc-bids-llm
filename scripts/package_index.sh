@@ -48,7 +48,11 @@ else
   mkdir -p dist
   # Build under a temp name, then rename: a failed or killed tar must never leave
   # a truncated dist/index.tgz behind for a later --upload-only to publish.
-  tar czf "$TARBALL.tmp" index/
+  # COPYFILE_DISABLE=1: macOS tar otherwise adds a ._<name> entry (AppleDouble
+  # metadata) for every file with extended attributes, and Linux tar unpacks
+  # those as real files: one left a stray ._index beside the unpacked index/
+  # and failed a server deploy. GNU tar ignores the variable.
+  COPYFILE_DISABLE=1 tar czf "$TARBALL.tmp" index/
   mv "$TARBALL.tmp" "$TARBALL"
   echo "built $TARBALL ($(du -h "$TARBALL" | cut -f1))"
   python3 - <<'PY'
