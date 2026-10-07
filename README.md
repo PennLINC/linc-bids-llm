@@ -8,6 +8,9 @@ someone already hit this (GitHub issues / NeuroStars), read the docs, and when
 necessary grep the actual code at the version the user ran — with links back to
 every source.
 
+How it works, from ingest to evaluation, with diagrams and real numbers:
+[docs/how-it-works.html](docs/how-it-works.html) (GitHub shows it as source;
+open your local copy in a browser).
 Full design + staged plan: [BIDS_ASSISTANT_BUILD_PLAN.md](BIDS_ASSISTANT_BUILD_PLAN.md).
 Post-v0 work (open-model A/B, AWS deployment + cost analysis):
 [ROADMAP.md](ROADMAP.md). Infrastructure (chunking, permalinks, incremental

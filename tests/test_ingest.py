@@ -1,6 +1,6 @@
 import pytest
 
-from src import ingest
+from src import common, ingest
 
 
 DOC = {
@@ -51,19 +51,35 @@ def test_chunk_ids_stable_unique_and_app_namespaced():
 
 
 def test_needs_full_reasons(config):
+    chunking = {"size_tokens": config["chunk"]["size_tokens"],
+                "overlap_tokens": config["chunk"]["overlap_tokens"]}
     good = {
         "embedding_model": config["retrieval"]["embed_model"],
-        "chunk_config": {"size_tokens": config["chunk"]["size_tokens"],
-                         "overlap_tokens": config["chunk"]["overlap_tokens"]},
+        "chunk_config": {**chunking, "chunker": common.CHUNKER_VERSION},
         "docs_shas": {}, "issues_since": {}, "ns_bumped": {},
     }
     assert ingest.needs_full(config, good) is None
     assert ingest.needs_full(config, None) == "no previous manifest"
     assert "embedding" in ingest.needs_full(config, {**good, "embedding_model": "x"})
-    assert "chunking" in ingest.needs_full(
-        config, {**good, "chunk_config": {"size_tokens": 1, "overlap_tokens": 0}})
+    assert "chunking" in ingest.needs_full(config, {**good, "chunk_config": {
+        "size_tokens": 1, "overlap_tokens": 0, "chunker": common.CHUNKER_VERSION}})
     legacy = {k: v for k, v in good.items() if k != "ns_bumped"}
     assert "predates" in ingest.needs_full(config, legacy)
+
+
+def test_needs_full_when_the_chunker_changed(config):
+    # An index built before the chunker was versioned (no "chunker" key) holds
+    # chunks the current chunker would cut differently. A sync re-chunks only
+    # what changed, so the whole index is rebuilt instead.
+    old = {
+        "embedding_model": config["retrieval"]["embed_model"],
+        "chunk_config": {"size_tokens": config["chunk"]["size_tokens"],
+                         "overlap_tokens": config["chunk"]["overlap_tokens"]},
+        "docs_shas": {}, "issues_since": {}, "ns_bumped": {},
+    }
+    reason = ingest.needs_full(config, old)
+    assert reason == f"chunker changed (v1 -> v{common.CHUNKER_VERSION})"
+    assert ingest._chunk_config(config)["chunker"] == common.CHUNKER_VERSION
 
 
 def test_fresh_index_dir_creates_and_wipes(tmp_path):

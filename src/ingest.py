@@ -9,9 +9,10 @@ Incremental sync per source:
   neurostars  — per-topic bumped_at; changed topics replaced, gone ones pruned
 
 A full rebuild is forced when the manifest is missing, predates the current
-schema, or the embedding model / chunking config changed (mismatched
-embeddings silently wreck retrieval). Run --full occasionally regardless:
-Chroma's sqlite accumulates slack across many increments.
+schema, or the embedding model / chunking config / chunker itself
+(common.CHUNKER_VERSION) changed: mismatched embeddings silently wreck
+retrieval, and a sync only re-chunks what changed. Run --full occasionally
+regardless: Chroma's sqlite accumulates slack across many increments.
 """
 import hashlib
 import json
@@ -89,7 +90,8 @@ def read_manifest(config: dict) -> dict | None:
 
 
 def _chunk_config(config: dict) -> dict:
-    return {k: config["chunk"][k] for k in ("size_tokens", "overlap_tokens")}
+    return {**{k: config["chunk"][k] for k in ("size_tokens", "overlap_tokens")},
+            "chunker": common.CHUNKER_VERSION}
 
 
 def needs_full(config: dict, manifest: dict | None) -> str | None:
@@ -98,7 +100,11 @@ def needs_full(config: dict, manifest: dict | None) -> str | None:
         return "no previous manifest"
     if manifest.get("embedding_model") != config["retrieval"]["embed_model"]:
         return "embedding model changed"
-    if manifest.get("chunk_config") != _chunk_config(config):
+    built = manifest.get("chunk_config") or {}
+    wanted = _chunk_config(config)
+    if built.get("chunker", 1) != wanted["chunker"]:   # manifests before v2 lack it
+        return f"chunker changed (v{built.get('chunker', 1)} -> v{wanted['chunker']})"
+    if built != wanted:
         return "chunking config changed"
     for key in ("docs_shas", "issues_since", "ns_bumped"):
         if key not in manifest:

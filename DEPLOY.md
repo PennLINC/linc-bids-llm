@@ -209,6 +209,29 @@ whole corpus — so a genuine shrink needs `ALLOW_SHRINK=1 scripts/refresh.sh`.
 The one exception is exit status **3**: the new index is live, but the app
 restart or the asset publish failed after the swap.
 
+**Full rebuilds belong on a laptop, not the server.** A refresh normally syncs
+only what changed. When the embedding model, the chunk settings or the chunker
+itself (`CHUNKER_VERSION` in `src/common.py`) changes, the next refresh
+rebuilds the whole index instead, and its log says why (`== full rebuild
+(chunker changed (v1 -> v2)) ==`). That re-harvests everything (about 33 min,
+mostly the NeuroStars crawl at one request per second) and re-embeds every
+chunk (5 min on an M3 Pro laptop; 11.5 min on one of its cores, and the unit
+embeds single-threaded on a slower, burstable CPU). The whole run took 38 min
+on the laptop in October 2026, so on the 2 GB box it would likely overrun the
+unit's 60-minute `TimeoutStartSec`: the live index survives, but the run alerts
+and the next night tries again. Ship such a change by building the index on a
+laptop and handing it to the server the same day, before 03:30 UTC: a nightly
+run on the old code would publish its old index over yours.
+
+```bash
+# laptop, once the change is merged
+python -m src.ingest --full && scripts/package_index.sh --upload
+# server
+REFRESH_INDEX=1 scripts/deploy.sh   # pull, fetch the new index, restart
+```
+
+The nightly refresh is incremental again from there.
+
 **Monitoring — an e-mail when the nightly refresh fails or stops running.**
 Optional; inert until configured. The unit reports every run to
 [healthchecks.io](https://healthchecks.io) (free plan) through
