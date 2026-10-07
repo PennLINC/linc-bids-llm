@@ -23,6 +23,11 @@ pytestmark = pytest.mark.skipif(shutil.which("bash") is None,
 # Linux and does not exist on macOS (where the scripts run unlocked).
 REAL_FLOCK = shutil.which("flock", path="/usr/bin:/bin")
 needs_flock = pytest.mark.skipif(REAL_FLOCK is None, reason="no flock(1) here (macOS)")
+# macOS tar applies a ._<name> entry to the file it precedes as metadata rather
+# than unpacking it; the stray-file failure these guard against is GNU tar's
+# (the server's, and CI's).
+gnu_tar = pytest.mark.skipif(sys.platform == "darwin",
+                             reason="macOS tar treats ._ entries as metadata")
 
 OLD = {"chunks": {"docs": 100, "issues": 200}, "built_at": "old"}
 NEW = {"chunks": {"docs": 100, "issues": 205}, "built_at": "new"}
@@ -483,6 +488,22 @@ def test_a_failed_tar_keeps_the_previous_tarball(sandbox):
     assert (sandbox.repo / "dist" / "index.tgz").read_text() == "last good snapshot"
 
 
+def test_package_leaves_macos_metadata_out_of_the_tarball(sandbox):
+    # macOS tar adds a ._<name> entry for every file with extended attributes,
+    # which Linux tar unpacks as real files (see the fetch_index.sh tests).
+    # Linux tar adds none, so there the check holds trivially.
+    _real_package_script(sandbox)
+    if sys.platform == "darwin":
+        subprocess.run(["xattr", "-w", "org.pennlinc.test", "1",
+                        str(sandbox.repo / "index" / "fts.sqlite")], check=True)
+    r = sandbox.run("package_index.sh")
+    assert r.returncode == 0, r.stderr
+    with tarfile.open(sandbox.repo / "dist" / "index.tgz") as tar:
+        names = tar.getnames()
+    assert "index/fts.sqlite" in names
+    assert not [n for n in names if n.rsplit("/", 1)[-1].startswith("._")]
+
+
 def test_refresh_with_the_real_package_script_publishes_the_new_index(sandbox):
     _real_package_script(sandbox)
     r = sandbox.run()
@@ -604,16 +625,26 @@ def test_real_flock_deploy_and_fetch_bounce_off_a_held_lock(sandbox, held_lock):
 # is briefly gone during every re-publish) left no index/, deploy.sh died before
 # its restart, and every nightly refresh after that failed with "no live index".
 
-def tarball(path: Path, manifest=NEW, with_manifest=True) -> Path:
-    """A release-asset lookalike: index/manifest.json + index/fts.sqlite."""
+def tarball(path: Path, manifest=NEW, with_manifest=True, appledouble=False) -> Path:
+    """A release-asset lookalike: index/manifest.json + index/fts.sqlite.
+    `appledouble`: also entries named like the ._<name> files macOS tar adds
+    beside each file (and beside index/ itself) unless COPYFILE_DISABLE is set.
+    Their payload is plain bytes: Linux tar only sees the names, and macOS tar
+    would try to apply anything with the AppleDouble magic as metadata."""
     with tarfile.open(path, "w:gz") as tf:
         def add(name, data: bytes):
             info = tarfile.TarInfo(name)
             info.size = len(data)
             tf.addfile(info, io.BytesIO(data))
+        if appledouble:
+            add("._index", b"macOS metadata")
         if with_manifest:
             text = manifest if isinstance(manifest, str) else json.dumps(manifest)
+            if appledouble:
+                add("index/._manifest.json", b"macOS metadata")
             add("index/manifest.json", text.encode())
+        if appledouble:
+            add("index/._fts.sqlite", b"macOS metadata")
         add("index/fts.sqlite", b"new-db")
     return path
 
@@ -699,6 +730,31 @@ def test_fetch_keeps_only_the_newest_backup(sandbox, asset):
     assert json.loads((sandbox.repo / backup / "manifest.json").read_text()) == OLD
     assert "removed older backup index.bak.1000000000/" in r.stdout
     assert "removed older backup index.bak.1000000001/" in r.stdout
+
+
+@gnu_tar
+def test_fetch_skips_macos_metadata_and_runs_to_the_end(sandbox):
+    # A laptop-built asset packed without COPYFILE_DISABLE. Linux tar unpacked
+    # its ._index beside index/, the post-swap rmdir of the unpack dir failed,
+    # and deploy.sh died before its restart with the new index already live.
+    asset = tarball(sandbox.root / "mac.tgz", appledouble=True)
+    r = sandbox.run("fetch_index.sh", FAKE_TARBALL=asset)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert json.loads(sandbox.manifest.read_text()) == NEW
+    assert sorted(p.name for p in (sandbox.repo / "index").iterdir()) == [
+        "fts.sqlite", "manifest.json"]                          # no ._ files
+    (backup,) = sandbox.leftovers()                              # no index.fetch.* left
+    assert f"kept one backup: {backup}/" in r.stdout             # it ran to the end
+
+
+@gnu_tar
+def test_deploy_restarts_after_fetching_a_macos_built_tarball(sandbox):
+    sandbox.use_real_flock()
+    asset = tarball(sandbox.root / "mac.tgz", appledouble=True)
+    r = sandbox.run("deploy.sh", FAKE_TARBALL=asset, REFRESH_INDEX=1)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "sudo systemctl restart sandbox-svc" in sandbox.calls()
+    assert r.stdout.endswith("deployed abc1234\n")
 
 
 def test_fetch_onto_a_box_with_no_index_yet(sandbox, asset):

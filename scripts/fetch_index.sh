@@ -81,7 +81,9 @@ fi
 
 # 2. unpack beside index/, not over it, and check the manifest before trusting it.
 mkdir "$UNPACK"
-tar xzf "$TMP_TARBALL" -C "$UNPACK" || {    # the tarball holds index/...
+# --exclude: a tarball built on macOS without COPYFILE_DISABLE holds ._<name>
+# metadata entries beside each file, which Linux tar would unpack as files.
+tar xzf "$TMP_TARBALL" -C "$UNPACK" --exclude='._*' || {    # the tarball holds index/...
   echo "error: could not unpack $TMP_TARBALL; index/ is untouched." >&2
   exit 1
 }
@@ -117,15 +119,21 @@ if ! mv "$UNPACK/index" index; then
   echo "error: could not move the new index into place; the old index/ is back." >&2
   exit 1
 fi
-rmdir "$UNPACK"
-mv "$TMP_TARBALL" "$TARBALL"
-echo "unpacked index/ (tarball kept at $TARBALL)"
+# The new index is live from here, so nothing below may fail the run: a deploy
+# that dies now skips its restart and leaves the app on the replaced index.
+# Anything else the tarball held goes with $UNPACK (the EXIT trap removes it).
+if mv "$TMP_TARBALL" "$TARBALL"; then
+  echo "unpacked index/ (tarball kept at $TARBALL)"
+else
+  echo "unpacked index/ (warning: could not keep the tarball at $TARBALL)" >&2
+fi
 
 # 4. keep one backup, the index just replaced; older ones only eat disk.
 shopt -s nullglob; backups=(index.bak.*); shopt -u nullglob
 if [ "${#backups[@]}" -gt 1 ]; then
   for old in "${backups[@]:0:${#backups[@]}-1}"; do
-    rm -rf "$old"; echo "removed older backup $old/"
+    if rm -rf "$old"; then echo "removed older backup $old/"
+    else echo "warning: could not remove older backup $old/" >&2; fi
   done
 fi
 [ -z "$BACKUP" ] || echo "kept one backup: $BACKUP/ (rm -rf it once the new index checks out)"
