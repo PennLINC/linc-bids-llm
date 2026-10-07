@@ -1,0 +1,106 @@
+name: CI
+
+# Every branch push is tested: branches here are pushed (often by agents)
+# before a PR exists. pull_request also runs for every PR: it tests the merge
+# with main (the push run tests the branch tip only), and it is the only run
+# for fork PRs and for branches cut before this file reached main.
+on:
+  push:
+    branches: ["**"]   # branches only, not tags (the index-latest release)
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to a branch or PR cancels the run it supersedes. Runs on main
+# each get their own group, so none waits for, or is replaced by, a later merge.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04   # the server's OS (DEPLOY.md): flock + GNU tools as the scripts meet them there
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # No `cache: pip`: measured, restoring the ~450 MB of wheels takes longer
+      # (6 s) than re-downloading them (2 s); the install is mostly unpacking.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"   # the linc-bids-llm env's python
+
+      # test_tools.py skips without rg, and three test_refresh.py tests skip
+      # without /usr/bin/flock (so they never run on macOS). Here a missing
+      # tool fails the job instead.
+      - name: Install ripgrep
+        run: |
+          if ! command -v rg >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ripgrep
+          fi
+          rg --version
+          /usr/bin/flock --version
+
+      # torch arrives via sentence-transformers, and its default Linux wheel
+      # pulls in gigabytes of CUDA libraries. Take only the CPU build from
+      # PyTorch's index (--no-deps: its copies of other packages lag PyPI);
+      # the requirements install then finds torch satisfied and resolves
+      # torch's own dependencies from PyPI like everything else.
+      - name: Install dependencies
+        run: |
+          python -m pip install --no-deps torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r requirements.txt
+          python -m pip check
+
+      # The tests fake the LLM client and the embedder and never load the UI
+      # (app.py), so nothing else shows these import against what pip just
+      # resolved (requirements.txt pins top-level packages only).
+      - name: Import the packages the tests never load
+        run: |
+          python -c "import openai, sentence_transformers, streamlit"
+          # the CPU build must have survived the requirements install
+          python -c "import torch; assert torch.__version__.endswith('+cpu'), torch.__version__"
+
+      # Chunking loads tiktoken's cl100k_base: a 1.7 MB download, and the
+      # suite's only network access. Cache it, and on a miss fetch it here so
+      # that a failed download fails this step, not whichever test tokenizes
+      # first.
+      - name: Cache the tiktoken encoding
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/tiktoken
+          key: tiktoken-cl100k_base
+
+      - name: Fetch the tiktoken encoding (a no-op on a cache hit)
+        env:
+          TIKTOKEN_CACHE_DIR: ${{ runner.temp }}/tiktoken
+        run: python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
+
+      - name: Run tests
+        env:
+          TIKTOKEN_CACHE_DIR: ${{ runner.temp }}/tiktoken
+        run: python -m pytest -rs
+
+  static:
+    name: static checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Not a style gate: syntax errors and undefined names only. Nothing else
+      # checks app.py and probes/, which no test imports.
+      - name: Python syntax errors and undefined names
+        run: pipx run --spec ruff==0.16.10 ruff check --select E9,F63,F7,F82 .
+
+      # Pinned like ruff: the runner image's own shellcheck is 0.9.0, whose
+      # default checks differ from the current release's in both directions.
+      - name: shellcheck the server scripts
+        run: pipx run --spec shellcheck-py==0.11.0.1 shellcheck scripts/*.sh

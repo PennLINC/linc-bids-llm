@@ -1,5 +1,7 @@
 # bids-assistant
 
+[![CI](https://github.com/PennLINC/linc-bids-llm/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PennLINC/linc-bids-llm/actions/workflows/ci.yml)
+
 A troubleshooting assistant for the lab's BIDS Apps (v0: QSIPrep only). It
 answers questions and diagnoses errors the way a maintainer does: check whether
 someone already hit this (GitHub issues / NeuroStars), read the docs, and when
@@ -20,6 +22,20 @@ pip install -r requirements.txt      # requirements.txt mirrors this env exactly
 cp config.example.yaml config.yaml   # set contact_email
 cp .env.example .env                 # set GITHUB_TOKEN (harvest), OPENAI_API_KEY
 ```
+
+## Tests
+
+```bash
+pytest        # ~15 s; needs no API keys, config.yaml, index or checkouts
+```
+
+HTTP and the LLM are mocked; the only network access is tiktoken downloading
+its 1.7 MB `cl100k_base` encoding when that is not already in its cache. The
+tests that need `rg` or `flock` skip where the tool is missing (`flock`: always
+on macOS). [CI](.github/workflows/ci.yml) runs the full suite on every push and
+PR, on the server's OS and Python version (Ubuntu 24.04, Python 3.12) with
+CPU-only torch, plus `shellcheck` on `scripts/` and a syntax / undefined-name
+check on all Python.
 
 ## Hosted preview
 
