@@ -124,3 +124,47 @@ def test_query_works_from_another_thread(store):
     t.join()
     assert "error" not in out, out.get("error")
     assert out["result"][0]["id"] == "2"
+
+
+# --- grouping by document ---------------------------------------------------------
+
+def _thread_chunks(n, gh_issue, title):
+    """n chunk records of one issue thread, all about eddy (so all match)."""
+    return [{"id": f"t{gh_issue}-{i}", "text": f"eddy eddy eddy part {i} of {title}",
+             "app": "qsiprep", "source": "issues", "title": title,
+             "url": f"https://github.com/PennLINC/qsiprep/issues/{gh_issue}",
+             "gh_issue": gh_issue} for i in range(n)]
+
+
+def test_per_doc_keeps_one_long_thread_from_filling_the_top_k(store):
+    store.add(_thread_chunks(6, 703, "b0 threshold") + _thread_chunks(2, 747, "eddy gpu"))
+    # 9 chunks mention eddy, from 3 documents: the top 4 must repeat one
+    flat = store.hybrid_query("eddy", k=4)
+    assert len({r["url"] for r in flat}) < len(flat)
+    grouped = store.hybrid_query("eddy", k=4, per_doc=1)
+    urls = [r["url"] for r in grouped]
+    assert len(urls) == len(set(urls))                       # one chunk per thread
+    assert "https://github.com/PennLINC/qsiprep/issues/747" in urls
+    hits = {r["url"]: r["doc_hits"] for r in grouped}
+    assert hits["https://github.com/PennLINC/qsiprep/issues/703"] == 6
+    assert hits["https://github.com/PennLINC/qsiprep/issues/747"] == 2
+
+
+def test_per_doc_groups_docs_chunks_by_file():
+    from src.store import doc_url
+    assert doc_url({"url": "https://x/blob/1.0/docs/a.rst?plain=1#L1-L9"}) \
+        == doc_url({"url": "https://x/blob/1.0/docs/a.rst?plain=1#L10-L30"})
+    assert doc_url({"id": "z"}) == "z"                        # no url: the chunk alone
+
+
+def test_doc_chunks_come_back_in_order(store):
+    from src import ingest
+    rec = {"text": "\n\n".join(f"paragraph {i} " + "word " * 30 for i in range(12)),
+           "app": "qsiprep", "source": "issues", "title": "long one",
+           "url": "https://github.com/PennLINC/qsiprep/issues/5", "gh_issue": 5}
+    chunks = ingest.chunk_record(rec, 60, 10)
+    assert len(chunks) > 3
+    store.add(list(reversed(chunks)))                         # stored back to front
+    got = store.doc_chunks({"app": "qsiprep", "source": "issues", "gh_issue": 5})
+    assert [c["id"] for c in got] == [c["id"] for c in chunks]
+    assert store.doc_chunks({"app": "qsiprep", "source": "issues", "gh_issue": 6}) == []

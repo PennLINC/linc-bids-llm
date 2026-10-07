@@ -44,7 +44,7 @@ def config(tmp_path):
         "retrieval": {"top_k": 8, "candidates": 40,
                       "embed_model": "BAAI/bge-small-en-v1.5"},
         "chunk": {"size_tokens": 100, "overlap_tokens": 20},
-        "llm": {"oneshot_model": "gpt-test", "agent_model": "gpt-test-big",
+        "llm": {"judge_model": "gpt-test", "agent_model": "gpt-test-big",
                 "max_output_tokens": 500, "max_tool_iterations": 4},
         "index": {"path": str(tmp_path / "index")},
         "checkouts": {"path": str(tmp_path / "checkouts")},

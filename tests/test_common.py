@@ -161,3 +161,63 @@ def test_load_config_index_path_override(tmp_path, monkeypatch):
     monkeypatch.delenv("BIDS_INDEX_PATH")
     assert common.load_config(str(cfg))["index"]["path"] == "./index"
     common.load_config.cache_clear()
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_stitch_chunks_puts_the_document_back(seed):
+    # The same random mixes as above, with every line distinct so no stretch of
+    # the document repeats another: stitching the chunks gives back exactly the
+    # original's lines, give or take blank ones where two chunks met.
+    rng = random.Random(seed)
+    lines = []
+    for n in range(rng.randint(5, 80)):
+        roll = rng.random()
+        if roll < 0.08:
+            lines.append(f"## heading {n}")
+        elif roll < 0.25:
+            lines.append("")
+        elif roll < 0.4:
+            lines.append(f"long{n} " + "x " * rng.randint(15, 90))
+        else:
+            lines.append(f"l{n} " + " ".join(["w"] * rng.randint(1, 10)))
+    text = "\n".join(lines).strip("\n")
+    chunks = [c for c, _, _ in common.chunk_text(text, 40, 15)]
+    stitched = common.stitch_chunks(chunks, 15)
+    assert [ln for ln in stitched.split("\n") if ln.strip()] \
+        == [ln for ln in text.split("\n") if ln.strip()]
+
+
+def test_stitch_chunks_is_exact_when_blank_lines_are_single():
+    text = "\n\n".join(f"paragraph {i}: " + "word " * 25 for i in range(10))
+    chunks = [c for c, _, _ in common.chunk_text(text, 60, 10)]
+    assert len(chunks) > 3
+    assert common.stitch_chunks(chunks, 10) == text
+
+
+def test_stitch_chunks_does_not_eat_repeated_lines():
+    # A log that repeats one line: where two chunks meet, the overlap is as
+    # long as it really is, not as long as the run of identical lines.
+    text = "\n".join(["start"] + ["same line again"] * 30 + ["end"])
+    chunks = [c for c, _, _ in common.chunk_text(text, 40, 10)]
+    assert common.stitch_chunks(chunks, 10) == text
+
+
+def test_scope_includes_neighbors():
+    cfg = {"apps": {"qsiprep": {"neighbors": ["qsirecon"]},
+                    "qsirecon": {"neighbors": ["qsiprep"]},
+                    "aslprep": {"neighbors": []}}}
+    assert common.scope(cfg, "qsiprep") == ["qsiprep", "qsirecon"]
+    assert common.scope(cfg, "aslprep") == ["aslprep"]          # no neighbors
+    assert common.scope(cfg, "cubids") == ["cubids"]            # app not in config
+
+
+def test_chunk_ids_follow_the_document_key():
+    rec = {"app": "qsiprep", "source": "issues", "gh_issue": 703}
+    assert common.doc_key(rec) == "qsiprep:issues:#703"
+    assert common.doc_key({"app": "qsiprep", "source": "neurostars",
+                           "ns_topic_id": 9}) == "qsiprep:neurostars:ns:9"
+    assert common.doc_key({"app": "qsiprep", "source": "docs",
+                           "gh_path": "docs/usage.rst"}) == "qsiprep:docs:docs/usage.rst"
+    # ids already in built indexes: changing them would orphan every chunk
+    assert common.chunk_id("qsiprep:issues:#703", 0) \
+        == "214640d474766a89bf67ff603a259045d3ae3f8e"

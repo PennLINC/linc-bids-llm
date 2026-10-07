@@ -5,13 +5,14 @@ Why hybrid: error strings and identifiers are exact-match creatures that dense
 embeddings blur ("RuntimeError: CUDA out of memory" vs. a paraphrase). BM25
 catches the literal token; vectors catch the paraphrase; RRF merges them.
 
-Keep the interface small (add / delete / hybrid_query / reset) so swapping a
-backing store stays a one-file change. Embeddings are computed here with the
+Keep the interface small (add / delete / hybrid_query / doc_chunks / reset)
+so swapping a backing store stays a one-file change. Embeddings are computed here with the
 local model pinned in config — Chroma's built-in embedder is never used.
 """
 import json
 import re
 import sqlite3
+from collections import Counter
 from pathlib import Path
 
 from . import common
@@ -41,6 +42,12 @@ def _fts_match_query(text: str) -> str | None:
 def _clause(k, v) -> dict:
     """One Chroma filter clause; a list value means membership ($in)."""
     return {k: {"$in": list(v)}} if isinstance(v, (list, tuple)) else {k: v}
+
+
+def doc_url(rec: dict) -> str:
+    """The document a chunk belongs to: its URL without the #L.. line anchor
+    docs chunks carry, so every chunk of a thread or docs file shares one."""
+    return (rec.get("url") or rec.get("id", "")).split("#")[0]
 
 
 def _chroma_where(where: dict | None) -> dict | None:
@@ -177,12 +184,18 @@ class Store:
         return out
 
     def hybrid_query(self, text: str, k: int, where: dict | None = None,
-                     candidates: int | None = None) -> list[dict]:
+                     candidates: int | None = None,
+                     per_doc: int | None = None) -> list[dict]:
         """Top-k chunk records, fusing dense + BM25 candidate lists by RRF.
 
         `where` scopes both halves (e.g. {"app": "qsiprep", "source": "issues"}).
         `candidates` is the per-side pool depth before fusion (defaults to the
         retrieval.candidates config value).
+
+        `per_doc` caps how many chunks of one thread or docs file the top-k
+        may hold. Without it, a long thread whose chunks all match takes most
+        of the slots. Each record then also carries `doc_hits`: how many of its
+        document's chunks were in the fused pool.
         """
         pool = candidates or self.config["retrieval"]["candidates"]
         vec = self._vector_ids(text, pool, where)
@@ -192,17 +205,48 @@ class Store:
         for ranked in (vec, bm25):
             for rank, cid in enumerate(ranked):
                 scores[cid] = scores.get(cid, 0.0) + 1.0 / (RRF_K + rank + 1)
-        ranked_ids = sorted(scores, key=scores.get, reverse=True)[:k]
+        ranked_ids = sorted(scores, key=scores.get, reverse=True)
+        if per_doc is None:
+            ranked_ids = ranked_ids[:k]
 
         records = self._hydrate(ranked_ids)
+        ranked_ids = [cid for cid in ranked_ids if cid in records]
+        if per_doc is not None:
+            docs = {cid: doc_url(records[cid]) for cid in ranked_ids}
+            hits = Counter(docs.values())
+            taken: Counter = Counter()
+            picked = []
+            for cid in ranked_ids:
+                if taken[docs[cid]] < per_doc and len(picked) < k:
+                    taken[docs[cid]] += 1
+                    picked.append(cid)
+            ranked_ids = picked
         out = []
         for cid in ranked_ids:
-            rec = records.get(cid)
-            if rec is None:
-                continue
-            rec = dict(rec)
+            rec = dict(records[cid])
             rec["score"] = scores[cid]
             rec["in_vector"] = cid in vec
             rec["in_bm25"] = cid in bm25
+            if per_doc is not None:
+                rec["doc_hits"] = hits[docs[cid]]
             out.append(rec)
         return out
+
+    def doc_chunks(self, where: dict) -> list[dict]:
+        """Every chunk of one document, in order. `where` names it by metadata,
+        e.g. {"app": "qsiprep", "source": "issues", "gh_issue": 703}.
+
+        The order comes from the chunk ids (common.chunk_id), so it holds
+        whatever order Chroma stores them in."""
+        got = self.collection.get(where=_chroma_where(where),
+                                  include=["documents", "metadatas"])
+        recs = [{"id": cid, "text": doc, **(meta or {})}
+                for cid, doc, meta in zip(got["ids"], got["documents"], got["metadatas"])]
+        if not recs:
+            return []
+        key = common.doc_key(recs[0])
+        position = {common.chunk_id(key, i): i for i in range(len(recs))}
+        if any(r["id"] not in position for r in recs):
+            raise ValueError(f"chunks of {key} don't match their ids; "
+                             "is `where` naming a single document?")
+        return sorted(recs, key=lambda r: position[r["id"]])

@@ -9,6 +9,7 @@ per chunk are what make tag-pinned #L.. permalinks possible).
 import os
 import re
 import functools
+import hashlib
 from pathlib import Path
 
 # The lab VPN uses a TLS-inspecting proxy; trust the OS cert store instead of
@@ -38,6 +39,25 @@ HEADING_RE = re.compile(r"^#{1,6}\s")
 # their old chunks forever.
 #   2: no more shrinking copies of a window's tail before a long line
 CHUNKER_VERSION = 2
+
+
+def doc_key(rec: dict) -> str:
+    """Stable per-document key, namespaced by app + source (multi-app safe).
+    Reads the same fields from a harvested Record as from its chunks' metadata."""
+    app, source = rec["app"], rec["source"]
+    if source == "docs":
+        tail = rec["gh_path"]           # app is one repo; path is unique within it
+    elif source == "issues":
+        tail = f'#{rec["gh_issue"]}'    # issue numbers unique within the app's repo
+    else:  # neurostars
+        tail = f'ns:{rec["ns_topic_id"]}'
+    return f"{app}:{source}:{tail}"
+
+
+def chunk_id(key: str, i: int) -> str:
+    """Id of the i-th chunk of the document `key`: the same on every rebuild,
+    and a document's chunks can be put back in order from their ids alone."""
+    return hashlib.sha1(f"{key}:{i}".encode()).hexdigest()
 
 
 def load_dotenv(path: Path | None = None) -> None:
@@ -83,6 +103,14 @@ def user_agent(config: dict | None = None) -> str:
     config = config or load_config()
     contact = config.get("contact_email") or "no-contact-configured"
     return f"bids-assistant/0.1 (lab support-bot harvester; contact: {contact})"
+
+
+def scope(config: dict, app: str) -> list[str]:
+    """Apps whose content is in retrieval scope for a question about `app`:
+    the app itself plus its configured pipeline neighbors (e.g. qsiprep pulls
+    qsirecon for boundary questions). Used as a `where={"app": [...]}` filter."""
+    neighbors = ((config.get("apps") or {}).get(app) or {}).get("neighbors", []) or []
+    return [app, *neighbors]
 
 
 @functools.lru_cache(maxsize=1)
@@ -165,6 +193,39 @@ def chunk_text(text: str, size_tokens: int, overlap_tokens: int) -> list[tuple[s
                 overlap += line_tokens[back]
             i = back
     return chunks
+
+
+def stitch_chunks(chunks: list[str], overlap_tokens: int) -> str:
+    """Put a document back together from its chunk_text chunks, in order.
+
+    Each chunk opens on the lines that end the one before it (the overlap),
+    so each contributes only what follows them. Exact except where two chunks
+    meet without overlapping (a heading starts a new section, or a long line
+    left no room): the blank lines trimmed from that boundary come back as one.
+
+    The overlap is the longest run that matches, among those that fit in
+    `overlap_tokens` the way chunk_text counts them; without that cap a log
+    that repeats one line would read as one long overlap and lose copies.
+    """
+    out: list[str] = []
+    prev: list[str] = []
+    for chunk in chunks:
+        lines = chunk.split("\n")
+        # A proper suffix of the previous chunk and a proper prefix of this one:
+        # each chunk starts and ends past the one before it.
+        k, used = 0, 0
+        while k < min(len(prev), len(lines)) - 1:
+            used += count_tokens(lines[k] + "\n")
+            if used > overlap_tokens:
+                break
+            k += 1
+        while k and prev[-k:] != lines[:k]:
+            k -= 1
+        if out and not k:
+            out.append("")
+        out.extend(lines[k:])
+        prev = lines
+    return "\n".join(out)
 
 
 if __name__ == "__main__":

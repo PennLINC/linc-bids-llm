@@ -1,16 +1,16 @@
-"""Streamlit chat UI over the same pipeline as ask.py: router -> one-shot RAG
-or the agentic tool loop.
+"""Streamlit chat UI over the same agent as ask.py.
 
     streamlit run app.py
 
 Runs locally in the browser (localhost:8501); nothing is hosted. A lab member
 who has never cloned the app can paste an error and get a linked, version-aware
-answer. The routing decision and every tool call are shown in expanders so
-maintainers can see the assistant's work. Thumbs+comment feedback is logged to
-.feedback/ (gitignored) — the tuning signal for Stage 6.
+answer. Each tool call shows while the agent works and stays in an expander
+after, so maintainers can see the assistant's work. Thumbs+comment feedback is
+logged to .feedback/ (gitignored) — the tuning signal for Stage 6.
 """
 import json
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,12 +18,13 @@ from pathlib import Path
 import streamlit as st
 
 from src import answer as answer_mod
-from src import common, router as router_mod
+from src import common
 from src.ask import load_manifest
 from src.budget import Budget
 from src.checkouts import cloned_tags
 from src.feedback import issue_url, log_feedback, run_context
 from src.store import Store
+from src.tools import describe_call
 
 CHATS_DIR = Path(".chats")
 
@@ -74,6 +75,11 @@ def save_chat(chat: dict) -> None:
 def render_assistant(msg: dict) -> None:
     """Render a stored assistant turn: answer, then how it was produced."""
     st.markdown(msg["content"])
+    if msg.get("seconds") is not None:
+        st.caption(f"{len(msg.get('transcript') or [])} tool calls · "
+                   f"{msg['seconds']:.0f} s")
+    # Chats saved before every answer came from the agent: the one-shot path's
+    # answers carry the routing decision and the chunks they were given.
     if msg.get("route_reason"):
         st.caption(f"path: **{msg['route_path']}** — {msg['route_reason']}")
     if msg.get("sources"):
@@ -118,7 +124,8 @@ def feedback_block(app: str, state: dict, config: dict, manifest: dict) -> None:
             log_feedback({
                 "app": app,
                 "path": path,
-                "route_reason": messages[-1].get("route_reason"),  # auto vs forced
+                "seconds": messages[-1].get("seconds"),
+                "tool_calls": len(messages[-1].get("transcript") or []),
                 # Which answer this is, and for whom: the shared login has no
                 # users, so a random per-browser id is what tells one tester
                 # revising a rating from two testers rating the same chat.
@@ -146,36 +153,16 @@ def feedback_block(app: str, state: dict, config: dict, manifest: dict) -> None:
 
 # --- answering ----------------------------------------------------------------
 
-def answer_turn(question: str, app: str, mode: str, config: dict, store,
-                history: list[dict], meter=None) -> dict:
-    """Route (respecting a manual override), answer, and package the assistant
-    message dict (content + how it was produced) for storage/rendering."""
-    if mode == "One-shot":
-        chunks = store.hybrid_query(question, k=config["retrieval"]["top_k"],
-                                    where={"app": router_mod.scope(config, app)})
-        decision = router_mod.Decision("oneshot", chunks, "forced (sidebar)")
-    elif mode == "Agent":
-        decision = router_mod.Decision("agent", [], "forced (sidebar)")
-    else:
-        decision = router_mod.route(question, store, config, app, history=history)
-
-    msg = {"role": "assistant", "route_path": decision.path,
-           "route_reason": decision.reason}
-    if decision.path == "oneshot":
-        if not decision.chunks:
-            msg["content"] = ("Nothing relevant in the index for that. Try "
-                              "rephrasing, or switch to Agent mode in the sidebar.")
-            return msg
-        msg["content"] = answer_mod.answer_oneshot(
-            question, decision.chunks, app, config, meter=meter)
-        msg["sources"] = [{"title": c.get("title", "?"), "url": c.get("url", ""),
-                           "source": c.get("source", "")} for c in decision.chunks]
-    else:
-        result = answer_mod.answer_agent(question, app, config, store,
-                                         history=history, meter=meter)
-        msg["content"] = result.answer
-        msg["transcript"] = result.transcript
-    return msg
+def answer_turn(question: str, app: str, config: dict, store,
+                history: list[dict], meter=None, on_step=None) -> dict:
+    """Answer with the agent and package the assistant message dict (content
+    + how it was produced) for storage/rendering."""
+    started = time.monotonic()
+    result = answer_mod.answer_agent(question, app, config, store, history=history,
+                                     meter=meter, on_step=on_step)
+    return {"role": "assistant", "route_path": "agent", "content": result.answer,
+            "transcript": result.transcript,
+            "seconds": round(time.monotonic() - started, 1)}
 
 
 # --- entry --------------------------------------------------------------------
@@ -228,10 +215,6 @@ with st.sidebar:
     if _blurb(app):
         st.caption(_blurb(app))
     st.warning(DISCLAIMER)          # TEMPORARY (testing phase)
-    mode = st.radio("Answer mode", ["Auto", "One-shot", "Agent"], horizontal=True,
-                    help="Auto routes FAQ-shaped questions to a fast one-shot "
-                         "answer, and tracebacks, code questions and follow-ups "
-                         "in a chat to the agent (only the agent sees history).")
     st.divider()
     st.markdown(
         f"**Index built:** {manifest.get('built_at', '?')}\n\n"
@@ -239,8 +222,7 @@ with st.sidebar:
         + ", ".join(f"{k}: {v}" for k, v in manifest.get("chunks", {}).items())
         + f"\n\n**Checkouts ({app}):** "
         + (", ".join(cloned_tags(config, app)) or "none — run `python -m src.checkouts`")
-        + f"\n\n**Models:** one-shot `{config['llm']['oneshot_model']}`, "
-        f"agent `{config['llm']['agent_model']}`"
+        + f"\n\n**Model:** `{config['llm']['agent_model']}`"
     )
     if budget.limit is not None:
         st.caption(f"Spend today (UTC): ${budget.spent_today():.2f} / "
@@ -279,13 +261,28 @@ if question := st.chat_input(f"Paste an error or ask about {app}…"):
                      "you need it raised.")
             st.stop()
         history = answer_mod.agent_history(state["messages"][:-1])
-        with st.spinner("Retrieving + answering…"):
+        error = None
+        # The agent takes tens of seconds; show each step as it starts.
+        with st.status("Thinking…") as status:
+            steps = []
+
+            def show_step(tool: str, args: dict) -> None:
+                steps.append(describe_call(tool, args))
+                status.update(label=f"{steps[-1]}…")
+                status.write(steps[-1])
+
             try:
-                msg = answer_turn(question, app, mode, config, store, history,
-                                  meter=budget)
+                msg = answer_turn(question, app, config, store, history,
+                                  meter=budget, on_step=show_step)
+                status.update(label=f"Done: {len(steps)} steps in "
+                                    f"{msg['seconds']:.0f} s",
+                              state="complete", expanded=False)
             except SystemExit as e:  # e.g. missing OPENAI_API_KEY
-                st.error(str(e))
-                st.stop()
+                error = str(e)
+                status.update(label="Couldn't answer", state="error")
+        if error:
+            st.error(error)
+            st.stop()
         render_assistant(msg)
     state["messages"].append(msg)
 

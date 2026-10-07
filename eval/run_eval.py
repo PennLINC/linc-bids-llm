@@ -6,9 +6,11 @@
 
 Retrieval: for each held-out case, query with the opening post and check
 whether the gold thread's URL lands in the top-k — reported for hybrid, and for
-vector-only and BM25-only so fusion's contribution is visible. Answer eval:
-route + answer a sample, judge each against the historical resolution, per path.
-The scorecard is the regression gate for any retrieval/prompt/model change.
+vector-only and BM25-only so fusion's contribution is visible. Each list is
+scored the way the agent's search_kb shows results: one entry per thread or
+docs file. Answer eval: answer a sample with the agent and judge each against
+the historical resolution. The scorecard is the regression gate for any
+retrieval/prompt/model change.
 
 Feedback cases (eval/feedback_to_cases.py) run through the same scorers: the
 tester's correct URL is the gold, and their note on the flagged answer stands in
@@ -21,10 +23,9 @@ from pathlib import Path
 
 from src import common
 from src import answer as answer_mod
-from src import router as router_mod
-from src.store import Store
+from src.store import Store, doc_url
 
-from eval.urls import canon_url
+from src.urls import canon_url
 
 
 def _urls(records: list[dict]) -> list[str]:
@@ -45,6 +46,17 @@ def _ranked(store, ids: list[str]) -> list[dict]:
     return [records[i] for i in ids if i in records]
 
 
+def _first_docs(records: list[dict], k: int) -> list[dict]:
+    """The best-ranked chunk of each of the first k documents, the way
+    search_kb lists results (hybrid_query's per_doc=1)."""
+    seen, out = set(), []
+    for r in records:
+        if doc_url(r) not in seen and len(out) < k:
+            seen.add(doc_url(r))
+            out.append(r)
+    return out
+
+
 def retrieval_scores(store, cases: list[dict], k: int,
                      config: dict | None = None) -> dict:
     """hit@k and MRR for hybrid / vector-only / bm25-only, overall + per source.
@@ -60,14 +72,18 @@ def retrieval_scores(store, cases: list[dict], k: int,
     per_case = []
 
     cases = [c for c in cases if c.get("gold_url")]
+    # single-method lists are read this deep, as hybrid_query reads each side
+    pool = ((config or {}).get("retrieval") or {}).get("candidates", 40)
     for c in cases:
-        scope = router_mod.scope(config, c["app"]) if config else c["app"]
+        scope = common.scope(config, c["app"]) if config else c["app"]
         where = {"app": scope}
         gold = canon_url(c["gold_url"])
         ranked = {
-            "hybrid": store.hybrid_query(c["query"], k=k, where=where),
-            "vector": _ranked(store, store._vector_ids(c["query"], k, where)),
-            "bm25": _ranked(store, store._bm25_ids(c["query"], k, where)),
+            "hybrid": store.hybrid_query(c["query"], k=k, where=where, per_doc=1),
+            "vector": _first_docs(
+                _ranked(store, store._vector_ids(c["query"], pool, where)), k),
+            "bm25": _first_docs(
+                _ranked(store, store._bm25_ids(c["query"], pool, where)), k),
         }
 
         rr = {m: _reciprocal_rank(gold, [canon_url(u) for u in _urls(ranked[m])])
@@ -186,6 +202,13 @@ def judge_messages(case: dict, candidate: str) -> list[dict]:
 JUDGE_RUNS = 5
 
 
+def judge_model(config: dict) -> str:
+    """The small model that judges answers. Configs written while the app
+    still had a one-shot path name the same model `oneshot_model`."""
+    llm = config["llm"]
+    return llm.get("judge_model") or llm["oneshot_model"]
+
+
 def judge_answer(case: dict, candidate: str, config: dict, client) -> dict:
     """Pass only if every one of JUDGE_RUNS verdicts is a pass.
 
@@ -201,7 +224,7 @@ def judge_answer(case: dict, candidate: str, config: dict, client) -> dict:
     verdicts = []
     for _ in range(JUDGE_RUNS):
         msg = client.chat.completions.create(
-            model=config["llm"]["oneshot_model"], messages=messages,
+            model=judge_model(config), messages=messages,
             max_completion_tokens=300,
         ).choices[0].message
         try:
@@ -222,35 +245,24 @@ def answer_scores(store, cases: list[dict], config: dict, sample: int) -> dict:
     cases = [c for c in cases if (c.get("reference") or "").strip()]
     picked = rng.sample(cases, min(sample, len(cases)))
     client = answer_mod._client()
-    by_path: dict = {}
+    passed = []
     details = []
     for c in picked:
-        # a follow-up case routes as it did in the app: with its chat history
-        decision = router_mod.route(c["query"], store, config, c["app"],
-                                    history=c.get("history"))
-        if decision.path == "oneshot":
-            cand = answer_mod.answer_oneshot(c["query"], decision.chunks,
-                                             c["app"], config, client=client)
-        else:
-            # a follow-up turn is replayed with the chat it was asked in
-            cand = answer_mod.answer_agent(c["query"], c["app"], config, store,
-                                           history=c.get("history") or None,
-                                           client=client).answer
+        # a follow-up turn is replayed with the chat it was asked in
+        cand = answer_mod.answer_agent(c["query"], c["app"], config, store,
+                                       history=c.get("history") or None,
+                                       client=client).answer
         verdict = judge_answer(c, cand, config, client)
-        by_path.setdefault(decision.path, []).append(verdict["verdict"] == "pass")
-        path = decision.path
-        if c.get("rated_path") not in (None, path):
-            # replayed on a different path than the one the tester rated
-            # (the router changed its mind, or they had forced a mode)
-            path += f"; rated on {c['rated_path']}"
-        details.append({"case": f"{c['source']}#{c['case_id']}",
-                        "path": path, "verdict": verdict["verdict"],
-                        "reason": verdict["reason"]})
+        passed.append(verdict["verdict"] == "pass")
+        # a tester rated it on the one-shot path the app no longer has
+        rated = (f"rated on {c['rated_path']}"
+                 if c.get("rated_path") not in (None, "agent") else "")
+        details.append({"case": f"{c['source']}#{c['case_id']}", "rated": rated,
+                        "verdict": verdict["verdict"], "reason": verdict["reason"]})
 
     return {
         "n": len(picked),
-        "by_path": {p: {"n": len(v), "pass_rate": sum(v) / len(v)}
-                    for p, v in by_path.items()},
+        "pass_rate": sum(passed) / len(passed) if passed else 0.0,
         "details": details,
     }
 
@@ -294,10 +306,11 @@ def main():
         a = answer_scores(store, cases, config, args.answers)
         if not a["n"]:
             print("  nothing to judge — no case carries a reference")
-        for path, s in a["by_path"].items():
-            print(f"  {path:8s} pass={s['pass_rate']:.0%} (n={s['n']})")
+        else:
+            print(f"  pass={a['pass_rate']:.0%} (n={a['n']})")
         for d in a["details"]:
-            print(f"    [{d['verdict']:4s}] {d['case']} ({d['path']}): {d['reason']}")
+            rated = f" ({d['rated']})" if d["rated"] else ""
+            print(f"    [{d['verdict']:4s}] {d['case']}{rated}: {d['reason']}")
     store.close()
 
 
