@@ -1,12 +1,9 @@
 """Ask the assistant a question about a BIDS App.
 
     python -m src.ask "how do I set --output-resolution?"
-    python -m src.ask --agent "paste a traceback here..."
-    python -m src.ask --oneshot "..."      # force the cheap path
-    python -m src.ask --app qsiprep "..."  # v0 has one app; this is the default
+    python -m src.ask --app qsirecon "..."   # default: the first app in config
 
-Auto-routes between a one-shot RAG answer and the agentic tool loop, prints the
-routing decision, the answer, and every source consulted.
+Runs the agent's tool loop and prints the answer and every tool call it made.
 """
 import json
 import sys
@@ -14,7 +11,6 @@ from pathlib import Path
 
 from . import common  # first import: runs the truststore inject
 from . import answer as answer_mod
-from . import router as router_mod
 from .store import Store
 
 
@@ -37,24 +33,17 @@ def load_manifest(config: dict) -> dict:
     return manifest
 
 
-def _parse_args(argv: list[str]) -> tuple[str, str | None, str]:
-    force, app, words = None, None, []
+def _parse_args(argv: list[str]) -> tuple[str, str | None]:
+    app, words = None, []
     it = iter(argv)
     for a in it:
-        if a in ("--agent", "--oneshot"):
-            force = a.lstrip("-")
-        elif a == "--app":
+        if a == "--app":
             app = next(it, None)
+        elif a in ("--agent", "--oneshot"):
+            continue      # retired path switches: every question goes to the agent
         else:
             words.append(a)
-    return " ".join(words).strip(), app, force
-
-
-def _print_sources(chunks: list[dict]) -> None:
-    print("\nSources:")
-    for i, c in enumerate(chunks, 1):
-        print(f"  [{i}] {c.get('title', '?')} — {c.get('source', '')}")
-        print(f"      {c.get('url', '')}")
+    return " ".join(words).strip(), app
 
 
 def _print_transcript(transcript: list[dict]) -> None:
@@ -67,38 +56,20 @@ def _print_transcript(transcript: list[dict]) -> None:
 
 
 def main():
-    question, app, force = _parse_args(sys.argv[1:])
+    question, app = _parse_args(sys.argv[1:])
     if not question:
-        sys.exit('usage: python -m src.ask [--agent|--oneshot] [--app NAME] '
-                 '"your question"')
+        sys.exit('usage: python -m src.ask [--app NAME] "your question"')
 
     config = common.load_config()
     load_manifest(config)
     app = app or next(iter(config["apps"]))
     store = Store(config)
 
-    if force == "oneshot":
-        chunks = store.hybrid_query(question, k=config["retrieval"]["top_k"],
-                                    where={"app": router_mod.scope(config, app)})
-        decision = router_mod.Decision("oneshot", chunks, "forced --oneshot")
-    elif force == "agent":
-        decision = router_mod.Decision("agent", [], "forced --agent")
-    else:
-        decision = router_mod.route(question, store, config, app)
-
-    print(f"[route: {decision.path} — {decision.reason}]\n")
-
-    if decision.path == "oneshot":
-        if not decision.chunks:
-            sys.exit("Nothing retrieved — is the index empty? Re-run ingest.")
-        print(answer_mod.answer_oneshot(question, decision.chunks, app, config))
-        _print_sources(decision.chunks)
-    else:
-        result = answer_mod.answer_agent(question, app, config, store)
-        print(result.answer)
-        if result.transcript:
-            _print_transcript(result.transcript)
-        print(f"\n[{result.iterations} model turn(s)]")
+    result = answer_mod.answer_agent(question, app, config, store)
+    print(result.answer)
+    if result.transcript:
+        _print_transcript(result.transcript)
+    print(f"\n[{result.iterations} model turn(s)]")
 
 
 if __name__ == "__main__":

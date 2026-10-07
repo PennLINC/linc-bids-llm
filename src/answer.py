@@ -1,16 +1,22 @@
-"""The two answer paths and their prompts.
+"""The answer path: the agent's prompt and its tool loop.
 
 Unlike linc-llm's strict "answer only from context", this assistant is
 diagnostic: it may reason beyond the retrieved text, but must label speculation,
 cite what it used (URLs / permalinks), and ask for the version + full traceback
 when the input is thin. When genuinely stuck it drafts a GitHub issue rather
 than guessing.
+
+Every question goes to the agent. Until October 2026 a router sent short
+first questions with a confident-looking match to a one-shot path (one call
+to a smaller model over the top 8 chunks, no tools); testers found its answers
+unreliable, and the agent answered the same questions well on a follow-up.
 """
 import json
 import os
 import re
 from dataclasses import dataclass, field
 from datetime import date
+from typing import Callable
 
 from . import common
 from .tools import TOOL_SCHEMAS, Toolbox
@@ -24,31 +30,20 @@ CITE_RULES = (
     "the user ran is unknown and it matters, ask for it."
 )
 
-SYSTEM_ONESHOT = (
-    "You are a troubleshooting assistant for the {app} BIDS App, answering a "
-    "member of the lab. You are given numbered context chunks retrieved from "
-    "past GitHub issues, solved NeuroStars threads, and the docs.\n"
-    "- Prefer answering from the context; cite chunks by their bracket index "
-    "like [1] or [2][4], and only cite chunks you actually used.\n"
-    "- You may add practical diagnostic reasoning, but label anything not "
-    "supported by the context as such.\n"
-    "- If the context does not actually answer the question, say so and ask "
-    "for the version, exact command, and full traceback.\n"
-    "- Be concise and practical; give the steps, not a preamble.\n"
-    "{notes}"
-    "Today's date: {today}."
-)
-
 SYSTEM_AGENT = (
     "You are a maintainer-style troubleshooting assistant for the {app} BIDS "
     "App, helping a member of the lab diagnose an error or answer a question.\n"
     "Work like a maintainer:\n"
     "1. FIRST call search_kb — someone may have already hit this (closed "
     "issues, solved NeuroStars threads).\n"
-    "2. If it's a code question or the traceback points at source, grep_code "
+    "2. When a result looks like the same problem, read_thread it before you "
+    "rely on it: a search snippet is only the start of one part, and the fix is "
+    "usually in the replies (an accepted answer, a maintainer's last comments). "
+    "Read docs pages with read_file.\n"
+    "3. If it's a code question or the traceback points at source, grep_code "
     "the version the user ran to find the raising line, then read_file to read "
     "it and get a permalink.\n"
-    "3. Version awareness is core: users run old containers. A version the user "
+    "4. Version awareness is core: users run old containers. A version the user "
     "gave earlier in this chat still counts (each user turn ends with a note on "
     "what has been stated) — do not ask for it again. If the version is unknown "
     "and it matters, ASK for it before grepping; note when a fix landed in a "
@@ -74,10 +69,8 @@ def _notes_block(config: dict, app: str) -> str:
     """Domain-boundary facts for the app + its neighbors, injected into the
     system prompt. This is how the assistant is told things the corpus/model
     gets wrong — e.g. that reconstruction is qsirecon's job, not qsiprep's."""
-    from .router import scope
-
     lines = []
-    for a in scope(config, app):
+    for a in common.scope(config, app):
         for note in (config["apps"].get(a) or {}).get("notes", []) or []:
             lines.append(f"- ({a}) {' '.join(note.split())}")
     if not lines:
@@ -89,48 +82,13 @@ def _notes_block(config: dict, app: str) -> str:
 def _client():
     if not os.environ.get("OPENAI_API_KEY"):
         raise SystemExit(
-            "OPENAI_API_KEY is not set — put it in .env. The answer paths need "
-            "it (harvesting/indexing do not).")
+            "OPENAI_API_KEY is not set — put it in .env. Answering needs it "
+            "(harvesting/indexing do not).")
     from openai import OpenAI  # import lazily
     return OpenAI()
 
 
-def _chat(client, model: str, messages: list, config: dict, tools=None,
-          meter=None):
-    kwargs = dict(model=model, messages=messages,
-                  max_completion_tokens=config["llm"]["max_output_tokens"])
-    if tools:
-        kwargs["tools"] = tools
-    resp = client.chat.completions.create(**kwargs)
-    if meter is not None:
-        meter.record(model, getattr(resp, "usage", None))
-    return resp.choices[0].message
-
-
-# --- one-shot path ---------------------------------------------------------
-
-def _oneshot_user_prompt(question: str, chunks: list[dict]) -> str:
-    parts = []
-    for i, c in enumerate(chunks, 1):
-        solved = " (solved)" if c.get("gh_solved") or c.get("ns_solved") else ""
-        parts.append(f"[{i}] {c.get('title', '?')} — {c.get('source', '')}{solved}\n"
-                     f"{c.get('url', '')}\n{c['text']}")
-    return "Context chunks:\n\n" + "\n\n".join(parts) + f"\n\nQuestion: {question}"
-
-
-def answer_oneshot(question: str, chunks: list[dict], app: str,
-                   config: dict, client=None, meter=None) -> str:
-    client = client or _client()
-    system = SYSTEM_ONESHOT.format(app=app, today=date.today().isoformat(),
-                                  notes=_notes_block(config, app))
-    msg = _chat(client, config["llm"]["oneshot_model"], [
-        {"role": "system", "content": system},
-        {"role": "user", "content": _oneshot_user_prompt(question, chunks)},
-    ], config, meter=meter)
-    return msg.content or ""
-
-
-# --- agentic path ----------------------------------------------------------
+# --- agent loop ------------------------------------------------------------
 
 @dataclass
 class AgentResult:
@@ -224,10 +182,12 @@ def _function_calls(resp) -> list:
 
 
 def answer_agent(question: str, app: str, config: dict, store,
-                 history: list | None = None, client=None, meter=None) -> AgentResult:
+                 history: list | None = None, client=None, meter=None,
+                 on_step: Callable[[str, dict], None] | None = None) -> AgentResult:
     """Run the tool loop on the Responses API: the model calls search_kb /
-    grep_code / read_file until it answers or hits the iteration cap (then it's
-    asked to wrap up with no tools).
+    read_thread / grep_code / read_file until it answers or hits the iteration
+    cap (then it's asked to wrap up with no tools). `on_step(tool, args)` is
+    called as each tool starts, so a UI can show the work as it happens.
 
     The Responses API is used here — not chat.completions — because the agent
     model is a reasoning model, and chat.completions rejects function tools
@@ -265,6 +225,8 @@ def answer_agent(question: str, app: str, config: dict, store,
                 args = json.loads(call.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
+            if on_step is not None:
+                on_step(call.name, args)
             result = toolbox.call(call.name, args)
             transcript.append({"tool": call.name, "args": args, "result": result})
             outputs.append({"type": "function_call_output",

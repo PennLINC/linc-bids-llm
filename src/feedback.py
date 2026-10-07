@@ -27,15 +27,16 @@ def run_context(config: dict, path: str) -> dict:
     """Provenance for a feedback entry: what actually produced this answer.
 
     Without this a rating is unattributable — you can't tell whether a bad
-    answer came from the one-shot model, the agent model, a different embedding
-    model, or an older build. Essential once models/config start changing (e.g.
-    comparing an open model against the current defaults).
+    answer came from another model, a different embedding model, or an older
+    build. Essential once models/config start changing (e.g. comparing an open
+    model against the current defaults).
     """
     llm = config.get("llm") or {}
+    # A one-shot answer can still be rated from a chat saved before the path
+    # was removed; its model is only known if the config still names it.
     model = llm.get("oneshot_model") if path == "oneshot" else llm.get("agent_model")
     return {
         "model": model,                              # the one that answered
-        "oneshot_model": llm.get("oneshot_model"),
         "agent_model": llm.get("agent_model"),
         "embed_model": (config.get("retrieval") or {}).get("embed_model"),
         "api_base": llm.get("api_base"),             # set when using an open model

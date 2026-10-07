@@ -14,7 +14,6 @@ schema, or the embedding model / chunking config / chunker itself
 retrieval, and a sync only re-chunks what changed. Run --full occasionally
 regardless: Chroma's sqlite accumulates slack across many increments.
 """
-import hashlib
 import json
 import shutil
 import sys
@@ -26,18 +25,6 @@ from .sources import docs_source, issues_source, neurostars_source
 from .store import Store
 
 
-def _chunk_key(rec: dict) -> str:
-    """Stable per-document key, namespaced by app + source (multi-app safe)."""
-    app, source = rec["app"], rec["source"]
-    if source == "docs":
-        tail = rec["gh_path"]           # app is one repo; path is unique within it
-    elif source == "issues":
-        tail = f'#{rec["gh_issue"]}'    # issue numbers unique within the app's repo
-    else:  # neurostars
-        tail = f'ns:{rec["ns_topic_id"]}'
-    return f"{app}:{source}:{tail}"
-
-
 def chunk_record(rec: dict, size: int, overlap: int) -> list[dict]:
     """Split one document/thread Record into chunk records with stable ids.
 
@@ -45,14 +32,14 @@ def chunk_record(rec: dict, size: int, overlap: int) -> list[dict]:
     the thread URL and carry the title on every chunk (chunk 0 already opens
     with it; later chunks get it prepended so each is self-describing).
     """
-    key = _chunk_key(rec)
+    key = common.doc_key(rec)
     meta = {k: v for k, v in rec.items() if k != "text"}
     is_docs = rec["source"] == "docs"
     chunks = []
     for i, (text, line_start, line_end) in enumerate(
             common.chunk_text(rec["text"], size, overlap)):
         chunk = dict(meta)
-        chunk["id"] = hashlib.sha1(f"{key}:{i}".encode()).hexdigest()
+        chunk["id"] = common.chunk_id(key, i)
         if is_docs:
             chunk["text"] = text
             chunk["gh_line_start"] = line_start

@@ -388,7 +388,7 @@ blockquote.q .who { display: block; font-family: var(--f-mono); font-size: .66re
     <li><a href="#indexes"><span class="n">3</span>Two indexes</a></li>
     <li><a href="#retrieval"><span class="n">4</span>Hybrid search</a></li>
     <li><a href="#freshness"><span class="n">5</span>Staying current</a></li>
-    <li><a href="#routing"><span class="n">6</span>Two answer paths</a></li>
+    <li><a href="#routing"><span class="n">6</span>One answer path</a></li>
     <li><a href="#agent"><span class="n">7</span>The agent</a></li>
     <li><a href="#trace"><span class="n">8</span>A recorded run</a></li>
     <li><a href="#guardrails"><span class="n">9</span>Cost and guardrails</a></li>
@@ -418,14 +418,14 @@ blockquote.q .who { display: block; font-family: var(--f-mono); font-size: .66re
 <section id="overview" aria-labelledby="h-overview">
   <p class="eyebrow">§0 · Overview</p>
   <h2 id="h-overview">The whole machine</h2>
-  <p class="lede">Two pipelines meet at a pair of stores. Every night an ingest job turns docs, issues and forum threads into a searchable index and refreshes copies of each app's code. Each question then goes through a router to one of two answer paths, and both read from those stores.</p>
+  <p class="lede">Two pipelines meet at a pair of stores. Every night an ingest job turns docs, issues and forum threads into a searchable index and refreshes copies of each app's code. Each question then goes to an agent that searches the index, reads the threads that match, and greps the code.</p>
 
   <figure class="fig wide ov">
     <div class="fig-title"><span>Data flow</span><span>Click a box to jump to its section</span></div>
     <div class="scroll-x">
     <svg viewBox="0 0 1010 440" role="img" aria-labelledby="ov-t ov-d">
       <title id="ov-t">How the PennLINC Assistant fits together</title>
-      <desc id="ov-d">Nightly ingest shapes, chunks and embeds docs, GitHub issues and NeuroStars threads into an index with vectors and keywords, and clones source code into checkouts. Per question, a router picks the agent or the one-shot path; both read the index, the agent also greps and reads the checkouts. Answers collect feedback, which feeds evaluation.</desc>
+      <desc id="ov-d">Nightly ingest shapes, chunks and embeds docs, GitHub issues and NeuroStars threads into an index with vectors and keywords, and clones source code into checkouts. Per question, the agent searches the index and reads the threads that match, and greps and reads the checkouts. Answers collect feedback, which feeds evaluation.</desc>
       <defs>
         <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
         <marker id="aht" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah-t"/></marker>
@@ -472,22 +472,16 @@ blockquote.q .who { display: block; font-family: var(--f-mono); font-size: .66re
         <text class="ts" x="386" y="402">40 clones · never embedded</text>
       </a>
 
-      <path class="edge-read" d="M610,123 H716" marker-end="url(#aht)"/>
-      <text class="lbl" x="664" y="114" text-anchor="middle">hybrid search</text>
-      <path class="edge-read" d="M610,206 H716" marker-end="url(#aht)"/>
-      <text class="lbl" x="664" y="197" text-anchor="middle">search_kb</text>
-      <path class="edge-read" d="M610,390 H690 V226 H716" marker-end="url(#aht)"/>
-      <text class="lbl" x="681" y="308" text-anchor="middle" transform="rotate(-90 681 308)">grep_code · read_file</text>
+      <path class="edge-read" d="M610,150 H716" marker-end="url(#aht)"/>
+      <text class="lbl" x="664" y="141" text-anchor="middle">search_kb</text>
+      <text class="lbl" x="664" y="166" text-anchor="middle">read_thread</text>
+      <path class="edge-read" d="M610,390 H690 V220 H716" marker-end="url(#aht)"/>
+      <text class="lbl" x="681" y="305" text-anchor="middle" transform="rotate(-90 681 305)">grep_code · read_file</text>
 
       <a href="#routing"><rect class="box" x="720" y="40" width="270" height="36" rx="8"/><text class="t" x="736" y="63">Question</text></a>
       <line class="edge" x1="855" y1="76" x2="855" y2="97" marker-end="url(#ah)"/>
-      <a href="#routing"><rect class="box" x="720" y="100" width="270" height="46" rx="8"/><text class="t" x="736" y="119">Router</text><text class="ts" x="736" y="136">traceback? follow-up? strong match?</text></a>
-      <line class="edge" x1="782" y1="146" x2="782" y2="173" marker-end="url(#ah)"/>
-      <line class="edge" x1="927" y1="146" x2="927" y2="173" marker-end="url(#ah)"/>
-      <a href="#agent"><rect class="box" x="720" y="176" width="125" height="60" rx="8"/><text class="t" x="734" y="196">Agent</text><text class="ts" x="734" y="212">gpt-5.6-terra</text><text class="ts" x="734" y="227">search·grep·read</text></a>
-      <a href="#routing"><rect class="box" x="865" y="176" width="125" height="60" rx="8"/><text class="t" x="879" y="196">One-shot</text><text class="ts" x="879" y="212">gpt-5.4-mini</text><text class="ts" x="879" y="227">8 chunks, 1 call</text></a>
-      <line class="edge" x1="782" y1="236" x2="782" y2="265" marker-end="url(#ah)"/>
-      <line class="edge" x1="927" y1="236" x2="927" y2="265" marker-end="url(#ah)"/>
+      <a href="#agent"><rect class="box" x="720" y="100" width="270" height="136" rx="8"/><text class="t" x="736" y="124">Agent</text><text class="ts" x="736" y="142">gpt-5.6-terra · every question</text><text class="ts" x="736" y="170">searches past threads and docs</text><text class="ts" x="736" y="188">reads the threads that match</text><text class="ts" x="736" y="206">greps and reads the code</text><text class="ts" x="736" y="224">at the user's version</text></a>
+      <line class="edge" x1="855" y1="236" x2="855" y2="265" marker-end="url(#ah)"/>
       <a href="#trace"><rect class="box" x="720" y="268" width="270" height="44" rx="8"/><text class="t" x="736" y="287">Answer with links</text><text class="ts" x="736" y="303">every claim tied to a source</text></a>
       <line class="edge" x1="855" y1="312" x2="855" y2="325" marker-end="url(#ah)"/>
       <a href="#feedback"><rect class="box" x="720" y="328" width="270" height="44" rx="8"/><text class="t" x="736" y="347">Feedback</text><text class="ts" x="736" y="363">thumb · category · correct URL</text></a>
@@ -725,7 +719,7 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
 <section id="retrieval" aria-labelledby="h-retrieval">
   <p class="eyebrow">§4 · Retrieval</p>
   <h2 id="h-retrieval">Hybrid search and rank fusion</h2>
-  <p class="lede">A search asks both indexes for their 40 best chunks and merges the two ranked lists with reciprocal rank fusion (RRF). The top 8 go to the model.</p>
+  <p class="lede">A search asks both indexes for their 40 best chunks and merges the two ranked lists with reciprocal rank fusion (RRF). The agent sees the top 8, one per thread or docs page (§7).</p>
 
   <div class="formula wide">
     <div class="eq">score = <span class="v">1 / (60 + rank in the vector list)</span> + <span class="k">1 / (60 + rank in the keyword list)</span></div>
@@ -741,11 +735,11 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
       <div class="fx-cols">
         <div class="fx-col v"><h4>Meaning · vector top 8</h4><ol id="fx-v"></ol></div>
         <div class="fx-col k"><h4>Keywords · BM25 top 8</h4><ol id="fx-b"></ol></div>
-        <div class="fx-col f"><h4>Fused · what the model gets</h4><ol id="fx-f"></ol></div>
+        <div class="fx-col f"><h4>Fused · top 8 chunks</h4><ol id="fx-f"></ol></div>
       </div>
       <p class="fx-route" id="fx-route"></p>
     </div>
-    <figcaption>Point at a row to find the same chunk in the other lists; other chunks of the same thread get a lighter shade. Fused rows show each side's rank (<span style="color:var(--teal-ink)">v</span> vector, <span style="color:var(--amber)">k</span> keyword, out of 40) and the summed score. Badges: <span class="badge">I</span> issue, <span class="badge">N</span> NeuroStars, <span class="badge">D</span> docs; <span class="ok">✓</span> solved.</figcaption>
+    <figcaption>Point at a row to find the same chunk in the other lists; other chunks of the same thread get a lighter shade. Fused rows show each side's rank (<span style="color:var(--teal-ink)">v</span> vector, <span style="color:var(--amber)">k</span> keyword, out of 40) and the summed score. Badges: <span class="badge">I</span> issue, <span class="badge">N</span> NeuroStars, <span class="badge">D</span> docs; <span class="ok">✓</span> solved. These are chunk-level results; the agent's search now keeps only the best chunk of each thread or docs page and fills the freed slots from further down.</figcaption>
   </figure>
 </section>
 
@@ -801,72 +795,33 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
 <!-- §6 ===================================================================== -->
 <section id="routing" aria-labelledby="h-routing">
   <p class="eyebrow">§6 · Answering</p>
-  <h2 id="h-routing">Two answer paths</h2>
-  <p class="lede">A router sends each question down a cheap one-call path or the agent path. The rules are a few lines of plain code, and the sidebar can override them.</p>
+  <h2 id="h-routing">One answer path</h2>
+  <p class="lede">Every question goes to the agent (§7). Until October 2026 a router sent short first questions with a confident-looking match to a one-shot path instead: one call to a smaller model over the top 8 chunks. At the October 6 lab meeting, testers got nonsensical answers from it and sensible ones once a follow-up reached the agent, so the one-shot path was removed.</p>
 
-  <figure class="fig wide rt">
-    <div class="fig-title"><span>Router decision</span><span>src/router.py</span></div>
-    <div class="scroll-x">
-    <svg viewBox="0 0 1100 240" role="img" aria-labelledby="rt-t rt-d">
-      <title id="rt-t">Router decision rules</title>
-      <desc id="rt-d">A traceback or long paste goes to the agent. A follow-up in an existing chat goes to the agent. Otherwise the router runs a hybrid search; if the top hit was found by both lists and is a solved thread or a docs page, the one-shot path answers from the 8 chunks; otherwise the agent answers.</desc>
-      <defs>
-        <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
-      </defs>
-      <rect class="box" x="10" y="40" width="100" height="56" rx="8"/><text class="t" x="24" y="73">Question</text>
-      <line class="edge" x1="110" y1="68" x2="137" y2="68" marker-end="url(#ah2)"/>
-      <rect class="dec" x="140" y="30" width="190" height="76" rx="8"/>
-      <text class="t" x="154" y="55">Traceback or</text><text class="t" x="154" y="72">long paste?</text><text class="ts" x="154" y="94">13+ lines / 1,200+ chars</text>
-      <line class="edge" x1="330" y1="68" x2="357" y2="68" marker-end="url(#ah2)"/><text class="yn" x="344" y="60" text-anchor="middle">no</text>
-      <rect class="dec" x="360" y="30" width="190" height="76" rx="8"/>
-      <text class="t" x="374" y="55">Follow-up</text><text class="t" x="374" y="72">in a chat?</text><text class="ts" x="374" y="94">the agent reads history</text>
-      <line class="edge" x1="550" y1="68" x2="577" y2="68" marker-end="url(#ah2)"/><text class="yn" x="564" y="60" text-anchor="middle">no</text>
-      <rect class="box-teal" x="580" y="40" width="140" height="56" rx="8"/>
-      <text class="t" x="594" y="63">Hybrid search</text><text class="ts" x="594" y="82">top 8, in scope</text>
-      <line class="edge" x1="720" y1="68" x2="747" y2="68" marker-end="url(#ah2)"/>
-      <rect class="dec" x="750" y="30" width="190" height="76" rx="8"/>
-      <text class="t" x="764" y="56">Strong match?</text><text class="ts" x="764" y="78">top hit in both lists,</text><text class="ts" x="764" y="94">and solved or docs</text>
-      <line class="edge" x1="940" y1="68" x2="967" y2="68" marker-end="url(#ah2)"/><text class="yn" x="954" y="60" text-anchor="middle">yes</text>
-      <rect class="box" x="970" y="34" width="120" height="68" rx="8"/>
-      <text class="t" x="984" y="58">One-shot</text><text class="ts" x="984" y="76">gpt-5.4-mini</text><text class="ts" x="984" y="92">the 8 chunks</text>
-      <line class="edge" x1="235" y1="106" x2="235" y2="167" marker-end="url(#ah2)"/><text class="yn" x="243" y="142">yes</text>
-      <line class="edge" x1="455" y1="106" x2="455" y2="167" marker-end="url(#ah2)"/><text class="yn" x="463" y="142">yes</text>
-      <line class="edge" x1="845" y1="106" x2="845" y2="167" marker-end="url(#ah2)"/><text class="yn" x="853" y="142">no</text>
-      <rect class="box" x="140" y="170" width="800" height="56" rx="8"/>
-      <text class="t" x="156" y="194">Agent</text><text class="ts" x="156" y="213">gpt-5.6-terra · runs its own searches, greps and reads (§7)</text>
-    </svg>
-    </div>
-    <figcaption>The sidebar's Answer mode can force either path: Auto (the default), One-shot, or Agent.</figcaption>
-  </figure>
+  <h3>Why it went</h3>
+  <p>The router's test for a confident match was weaker than it looked. A short first question went one-shot when its top search hit appeared anywhere in both top-40 lists (§4) and was a docs page or a solved thread. For a GitHub issue, solved meant closed as completed, which covers most of them, feature requests included.</p>
+  <div class="stat-line">
+    <div><b>4 of 5</b>demo questions went one-shot</div>
+    <div><b>10 of 17</b>short held-out questions, with their own thread left out</div>
+    <div><b>1,531 of 1,982</b>indexed issues counted as solved</div>
+    <div><b>267</b>of those labelled enhancement</div>
+  </div>
+  <p>The model then answered from whatever those 8 chunks held, with no way to search again or check the code. Asked whether eddy can use the GPU, the one-shot answer said a <code>--prefer-gpu</code> flag had replaced the config setting. Its top source was a closed enhancement ticket, and no QSIPrep release has that flag (main has an unreleased <code>--gpu</code>). The agent searched the code for the flag, found nothing, and gave the <code>use_cuda</code> setting that works.</p>
 
-  <p>Of the 48 opening posts in the held-out test set (§11), the router sends 17 to one-shot and 31 to the agent; most of those 31 are long pastes. All three searches in the fusion explorer route to one-shot. “What does --output-resolution do?” goes to the agent, because its top hit (#681) is an open issue.</p>
-
-  <h3>The one-shot path</h3>
-  <p>One call to <code>gpt-5.4-mini</code> with the 8 chunks the router already retrieved, numbered so the answer can cite them as [1] or [2][4]. The Sources list under the answer shows all 8.</p>
-<pre class="prompt wide"><span class="role">SYSTEM</span>  You are a troubleshooting assistant for the qsiprep BIDS App, answering a member of
-        the lab. You are given numbered context chunks retrieved from past GitHub issues,
-        solved NeuroStars threads, and the docs.
-        - Prefer answering from the context; cite chunks by their bracket index like [1] or
-          [2][4], and only cite chunks you actually used.
-        - You may add practical diagnostic reasoning, but label anything not supported by
-          the context as such.
-        - If the context does not actually answer the question, say so and ask for the
-          version, exact command, and full traceback.
-        - Be concise and practical; give the steps, not a preamble.
-        Important package facts (authoritative — trust these over any older/ambiguous
-        retrieved text):
-        - (qsiprep) qsiprep does DWI PREPROCESSING only. Reconstruction … moved to the
-          separate qsirecon package … A recon_spec.yaml is passed to qsirecon, not qsiprep.
-        - (qsirecon) qsirecon does RECONSTRUCTION / post-processing of qsiprep outputs …
-        Today's date: 2026-10-05.
-<span class="role">USER</span>    Context chunks:
-        [1] [ENH] add --prefer-gpu — issues (solved)
-        https://github.com/PennLINC/qsiprep/issues/725
-        …chunk text…
-        [2] Eddy error when using GPU — issues (solved)
-        …
-        Question: eddy is taking forever, can I use the GPU version?</pre>
-  <p class="small">This prompt is about 2,300 tokens, so a one-shot answer costs roughly a third of a cent. The “package facts” come from <code>config.yaml</code> and are added to both paths' instructions whenever that app is in scope. They exist to correct known confusions; this one keeps reconstruction questions away from QSIPrep, which no longer does reconstruction.</p>
+  <h3>What answering everything with the agent costs</h3>
+  <div class="scroll-x">
+  <table class="spec wide">
+    <thead><tr><th></th><th>One-shot (removed)</th><th>Agent before</th><th>Agent now</th></tr></thead>
+    <tbody>
+      <tr><td>Questions</td><td>The 7 that Auto sent there</td><td colspan="2">All 17: the 5 demo questions and 12 held-out cases, each with its own thread hidden</td></tr>
+      <tr><td class="nowrap">Median time</td><td>2.4 s</td><td>23 s (8 to 40)</td><td>24 s (10 to 37)</td></tr>
+      <tr><td class="nowrap">Median cost</td><td>0.36¢</td><td>3.4¢</td><td>3.6¢</td></tr>
+      <tr><td class="nowrap">Model calls, tool calls</td><td>1, none</td><td>5, 6</td><td>5, 7</td></tr>
+      <tr><td class="nowrap">Different sources per search</td><td>—</td><td>5.0 of 8</td><td>8 of 8</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p style="margin-top:1rem">Measured on October 7 against the 2026-10-07 index, one run per question. Costs count cached input at a tenth of the price, as OpenAI bills it; the app's daily meter counts all of it at full price, about 6¢ a question. A second run of the new agent took a median 22 seconds, so its difference from the old agent is within run-to-run noise. An LLM judge comparing the held-out answers with each thread's historical fix could not tell the two agents apart either: it passed 1 to 3 of 12 for each, and gave the same answer different verdicts on two runs. The price of a single path is the wait: about 20 seconds more per first question than the one-shot path took, and about 3¢.</p>
 </section>
 
 <!-- §7 ===================================================================== -->
@@ -878,7 +833,7 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
   <figure class="fig wide lp">
     <div class="fig-title"><span>The loop</span><span>src/answer.py · answer_agent</span></div>
     <div class="scroll-x">
-    <svg viewBox="0 0 1000 226" role="img" aria-labelledby="lp-t lp-d">
+    <svg viewBox="0 0 1000 270" role="img" aria-labelledby="lp-t lp-d">
       <title id="lp-t">Agent tool loop</title>
       <desc id="lp-d">The question, a version hint, recent chat history and package facts go to a model turn. The model calls tools, the outputs go back to the model, for up to 12 turns. When the model stops calling tools, it answers with citations or a GitHub issue draft.</desc>
       <defs>
@@ -900,16 +855,18 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
       <text class="lbl" x="523" y="70" text-anchor="middle">tool calls</text>
       <path class="edge-read" d="M570,122 H484" marker-end="url(#ah3t)"/>
       <text class="lbl" x="527" y="140" text-anchor="middle">outputs</text>
-      <rect class="box" x="570" y="16" width="230" height="168" rx="8"/>
+      <rect class="box" x="570" y="16" width="230" height="212" rx="8"/>
       <text class="t" x="586" y="38">Tools</text>
       <rect class="box-teal" x="584" y="48" width="202" height="38" rx="5"/>
       <text class="t2" x="596" y="65" style="font-family:var(--f-mono);font-weight:600">search_kb</text><text class="ts" x="596" y="79">issues · threads · docs</text>
-      <rect class="box-dash" x="584" y="92" width="202" height="38" rx="5"/>
-      <text class="t2" x="596" y="109" style="font-family:var(--f-mono);font-weight:600">grep_code</text><text class="ts" x="596" y="123">ripgrep, user's version</text>
+      <rect class="box-teal" x="584" y="92" width="202" height="38" rx="5"/>
+      <text class="t2" x="596" y="109" style="font-family:var(--f-mono);font-weight:600">read_thread</text><text class="ts" x="596" y="123">a whole issue or thread</text>
       <rect class="box-dash" x="584" y="136" width="202" height="38" rx="5"/>
-      <text class="t2" x="596" y="153" style="font-family:var(--f-mono);font-weight:600">read_file</text><text class="ts" x="596" y="167">lines + a pinned permalink</text>
-      <path class="edge" d="M390,152 V198 H925 V154" marker-end="url(#ah3)"/>
-      <text class="ts" x="658" y="216" text-anchor="middle">no more tool calls: write the answer</text>
+      <text class="t2" x="596" y="153" style="font-family:var(--f-mono);font-weight:600">grep_code</text><text class="ts" x="596" y="167">ripgrep, user's version</text>
+      <rect class="box-dash" x="584" y="180" width="202" height="38" rx="5"/>
+      <text class="t2" x="596" y="197" style="font-family:var(--f-mono);font-weight:600">read_file</text><text class="ts" x="596" y="211">lines + a pinned permalink</text>
+      <path class="edge" d="M390,152 V242 H925 V154" marker-end="url(#ah3)"/>
+      <text class="ts" x="658" y="260" text-anchor="middle">no more tool calls: write the answer</text>
       <rect class="box" x="860" y="44" width="130" height="108" rx="8"/>
       <text class="t" x="876" y="72">Answer</text>
       <text class="ts" x="876" y="94">cited, or a</text>
@@ -924,13 +881,14 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
   <table class="spec wide">
     <thead><tr><th>Tool</th><th>What it does</th><th>Limits</th></tr></thead>
     <tbody>
-      <tr><td><code>search_kb</code><br><span class="sv mono" style="font-weight:400">query, source_filter?</span></td><td>The hybrid search from §4 over the card's scope, optionally only issues, NeuroStars or docs</td><td>Top 8; each with title, URL, solved flag and a 240-character snippet</td></tr>
+      <tr><td><code>search_kb</code><br><span class="sv mono" style="font-weight:400">query, source_filter?</span></td><td>The hybrid search from §4 over the card's scope, optionally only issues, NeuroStars or docs. Each thread or docs page is listed once, by its best-matching chunk</td><td>Top 8; each with title, URL, solved flag, how many of its chunks matched, and a 240-character snippet</td></tr>
+      <tr><td><code>read_thread</code><br><span class="sv mono" style="font-weight:400">url, start?</span></td><td>An issue or NeuroStars thread from the index, put back together from its chunks: the question, the replies, how it ended</td><td>Whole when under 16,000 characters, as most are; otherwise the opening and the end, with line numbers for reading the middle</td></tr>
       <tr><td><code>grep_code</code><br><span class="sv mono" style="font-weight:400">pattern, version?, regex?</span></td><td>ripgrep over the checkout for that version. Literal text by default, case-insensitive unless the pattern has capitals</td><td>15 matches per file, 80 lines in all, 300 characters per line</td></tr>
       <tr><td><code>read_file</code><br><span class="sv mono" style="font-weight:400">path, version?, start?, end?</span></td><td>Numbered lines plus a GitHub link to exactly those lines, pinned to the tag (or to main's commit)</td><td>400 lines per call; paths outside the checkout are refused</td></tr>
     </tbody>
   </table>
   </div>
-  <p class="small" style="margin-top:.8rem">All three are read-only. The model gets no shell and no network access beyond these calls.</p>
+  <p class="small" style="margin-top:.8rem">All four are read-only. The model gets no shell and no network access beyond these calls. Docs pages need no tool of their own: they are files in the checkouts, so <code>read_file</code> reads them at the user's version.</p>
 
   <h3>Which code does “1.0.1” mean?</h3>
   <p>Users often run old containers, so the agent greps the release they ran, not main. A stated version maps to the nearest checkout on disk. The table shows why it matters: the same error line sits at a different place in different releases, and it no longer exists on main.</p>
@@ -966,6 +924,7 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
   <h3>What the agent is told</h3>
   <ol class="rules">
     <li>Call <code>search_kb</code> first. Someone may have hit this already, in a closed issue or a solved thread.</li>
+    <li>When a result looks like the same problem, <code>read_thread</code> it before relying on it. A snippet is only the start of one chunk; the fix is usually in the replies.</li>
     <li>For a code question or a traceback, <code>grep_code</code> the user's version to find the raising line, then <code>read_file</code> it to get a permalink.</li>
     <li>Use a version stated anywhere in the chat and don't ask for it again. If none was given and it matters, ask before grepping. Say when a fix landed in a later release.</li>
     <li>Cite every claim by URL or permalink, and label reasoning that goes beyond the sources.</li>
@@ -976,7 +935,6 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
   <h3>What it remembers of the chat</h3>
   <p>The agent sees the last 12 messages, plus the chat's opening message once it has scrolled out of that window, because that is usually where the version and the original error are. Each question also gets a one-line note about the version. When the user gave one two turns ago, the note reads:</p>
   <blockquote class="hint">(Earlier in this chat the user mentioned '1.0.1', which may be the version — do not ask for it again; confirm only if it is ambiguous.)</blockquote>
-  <p>The one-shot path takes no history, which is why the router sends every follow-up to the agent.</p>
 </section>
 
 <!-- §8 ===================================================================== -->
@@ -1004,7 +962,7 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
       <p>at <a href="https://github.com/PennLINC/qsiprep/blob/1.1.1/qsiprep/interfaces/fmap.py#L837-L850">lines 837–850</a>. It then hands those indices to <code>topup_inputs_from_4d_file</code>, which chooses up to <code>max_per_spec</code> representative b=0s per distortion group.</p>
       <p>If by “shell selection” you mean clustering/selecting nonzero b-value shells (e.g., assigning 900 and 1000 to one shell), QSIPrep 1.1.1 does not appear to implement that as a QSIPrep function here; this code only makes the <code>b &lt; b0_threshold</code> versus non-b0 decision.</p>
     </div>
-    <figcaption>Recorded on July 20, 2026, during development. The tools and their output format are the same today; the loop around them has since moved to the Responses API. Note the shape of the hunt: broad patterns first, a miss that becomes evidence, then the file that holds the decision, cited at tag 1.1.1. The answer also says plainly what it did not find.</figcaption>
+    <figcaption>Recorded on July 20, 2026, during development. The code tools and their output are the same today. Since then the loop has moved to the Responses API, search lists each thread once, and <code>read_thread</code> was added (§7). Note the shape of the hunt: broad patterns first, a miss that becomes evidence, then the file that holds the decision, cited at tag 1.1.1. The answer also says plainly what it did not find.</figcaption>
   </figure>
 </section>
 
@@ -1016,13 +974,13 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
 
   <div class="scroll-x">
   <table class="spec wide">
-    <thead><tr><th></th><th>One-shot</th><th>Agent</th></tr></thead>
+    <thead><tr><th></th><th>The agent</th></tr></thead>
     <tbody>
-      <tr><td>Model</td><td><code>gpt-5.4-mini</code></td><td><code>gpt-5.6-terra</code></td></tr>
-      <tr><td>OpenAI API</td><td>Chat Completions</td><td>Responses</td></tr>
-      <tr><td class="nowrap">Price per 1M tokens</td><td>$0.75 in, $4.50 out</td><td>$2.00 in, $12.00 out</td></tr>
-      <tr><td class="nowrap">Calls per answer</td><td>1</td><td>Up to 12 with tools, plus 1 wrap-up</td></tr>
-      <tr><td class="nowrap">Cost per answer</td><td>About 0.3¢ to 0.4¢</td><td>3.6¢ for a short run measured October 5; long hunts can reach 20¢ to 25¢</td></tr>
+      <tr><td>Model</td><td><code>gpt-5.6-terra</code>, through OpenAI's Responses API</td></tr>
+      <tr><td class="nowrap">Price per 1M tokens</td><td>$2.00 in, $12.00 out</td></tr>
+      <tr><td class="nowrap">Calls per answer</td><td>Up to 12 with tools, plus 1 wrap-up; 5 for the median test question</td></tr>
+      <tr><td class="nowrap">Cost per answer</td><td>Median 3.6¢ over 17 test questions on October 7, from 1.2¢ to 8.2¢; long hunts can reach 20¢ to 25¢</td></tr>
+      <tr><td class="nowrap">Time per answer</td><td>Median 24 seconds over the same questions, from 10 to 37</td></tr>
     </tbody>
   </table>
   </div>
@@ -1066,11 +1024,10 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
   "comment": "It asked for my version again; I said 1.0.1 above.",
   "question": "…", "answer": "…",
   "history": [ …the turns the agent saw… ],
-  "app": "qsiprep", "path": "agent",
-  "route_reason": "follow-up turn; needs chat context",
+  "app": "qsiprep", "path": "agent", "seconds": 31.4, "tool_calls": 6,
   "session": "3f9a1c2e", "chat_id": "20261006-110158-…", "turn": 2,
-  "model": "gpt-5.6-terra", "oneshot_model": "gpt-5.4-mini",
-  "agent_model": "gpt-5.6-terra", "embed_model": "BAAI/bge-small-en-v1.5",
+  "model": "gpt-5.6-terra", "agent_model": "gpt-5.6-terra",
+  "embed_model": "BAAI/bge-small-en-v1.5",
   "api_base": null, "commit": "e31f2c3",
   "index_built": "2026-10-05T16:04:37+00:00"
 }</pre>
@@ -1095,6 +1052,9 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
     <li><span><b>A thumb is required.</b> All three downs had a problem category picked but no thumb.</span><span class="sha">24c1b5b</span></li>
     <li><span><b>Feedback records the chat.</b> Each entry stores the turns the agent saw, so a follow-up can be replayed exactly.</span><span class="sha">95e9226</span></li>
   </ul>
+
+  <h3>What the October 6 meeting changed</h3>
+  <p>Testers in Auto mode got nonsensical answers from the one-shot path, and sensible ones once a follow-up reached the agent. Every question now goes to the agent (§6). The agent also reads whole threads and sees each thread once per search (§7), and each rating now records how long the answer took and how many tool calls it made.</p>
 </section>
 
 <!-- §11 ==================================================================== -->
@@ -1106,24 +1066,24 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
   <h3>Held-out set: does the thread that solved it come back?</h3>
   <p>48 solved QSIPrep cases: 24 issues closed as completed and 24 NeuroStars threads with an accepted answer. Half come from the older half of each history and half from the newer, so old phrasing is tested too. The query is the thread's opening post, and the target is the thread's URL.</p>
   <figure class="fig wide">
-    <div class="fig-title"><span>Retrieval on the held-out set · 48 cases, top 8</span><span>Re-run 2026-10-05</span></div>
+    <div class="fig-title"><span>Retrieval on the held-out set · 48 cases, top 8 threads or pages</span><span>Re-run 2026-10-07</span></div>
     <div class="chart">
       <div>
         <h4>Hit rate: right thread anywhere in the top 8</h4>
         <div class="hb"><span>Hybrid</span><span class="track"><span class="fill h" style="width:100%"></span></span><span class="val">100%</span></div>
-        <div class="hb"><span>Vector only</span><span class="track"><span class="fill v" style="width:95.8%"></span></span><span class="val">96%</span></div>
+        <div class="hb"><span>Vector only</span><span class="track"><span class="fill v" style="width:97.9%"></span></span><span class="val">98%</span></div>
         <div class="hb"><span>BM25 only</span><span class="track"><span class="fill k" style="width:100%"></span></span><span class="val">100%</span></div>
         <div class="axis"><span></span><span class="ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100%</span></span><span></span></div>
       </div>
       <div>
         <h4>MRR: average of 1 ÷ rank of the right thread</h4>
         <div class="hb"><span>Hybrid</span><span class="track"><span class="fill h" style="width:97.4%"></span></span><span class="val">0.974</span></div>
-        <div class="hb"><span>Vector only</span><span class="track"><span class="fill v" style="width:93.4%"></span></span><span class="val">0.934</span></div>
+        <div class="hb"><span>Vector only</span><span class="track"><span class="fill v" style="width:93.7%"></span></span><span class="val">0.937</span></div>
         <div class="hb"><span>BM25 only</span><span class="track"><span class="fill k" style="width:97.9%"></span></span><span class="val">0.979</span></div>
         <div class="axis"><span></span><span class="ticks"><span>0</span><span>.25</span><span>.50</span><span>.75</span><span>1</span></span><span></span></div>
       </div>
     </div>
-    <figcaption>An MRR of 1.0 would mean the right thread always came first; 0.974 means it was first in almost every case.</figcaption>
+    <figcaption>An MRR of 1.0 would mean the right thread always came first; 0.974 means it was first in almost every case. Each list counts a thread or docs page once, the way the agent's search shows them; counting chunks, vector-only scored 96% and 0.934, and the other two the same.</figcaption>
   </figure>
   <div class="callout">
     <p><b>Read these numbers with care.</b> Each query is the thread's own opening post, and that thread is in the index, so the exact words are there to match. That favors keywords, and BM25 alone does as well as hybrid. This test can't show what vectors add on reworded questions, like the b=10 example in §4. Tester cases with a correct URL can.</p>
@@ -1144,7 +1104,7 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
   <p>When the correct URL isn't in the top 8, the report says which of three things went wrong. The thread isn't in the index at all (a gap in what we ingest). It's indexed under an app outside the card's scope (a neighbors question). Or it's indexed and in scope but ranked too low, which is the only case that tuning search can fix. URLs are compared by a normalized key, so a pasted link ending in <code>#issuecomment-…</code> or a NeuroStars post number still matches.</p>
 
   <h3>Grading answers with a judge</h3>
-  <p><code>run_eval --answers N</code> asks each question again through today's router and paths. Then <code>gpt-5.4-mini</code> judges the new answer against the reference: the historical fix for held-out cases, or the tester's note for feedback cases. The judge reads the whole answer (up to 12,000 characters, keeping the start and the end) and the earlier turns of the chat. Each case is judged five times and passes only if all five pass. A split verdict is labeled, for example <code>[judge split: 3 of 5 runs passed]</code>, and left for a person to read.</p>
+  <p><code>run_eval --answers N</code> asks each question again through the agent. Then <code>gpt-5.4-mini</code> judges the new answer against the reference: the historical fix for held-out cases, or the tester's note for feedback cases. The judge reads the whole answer (up to 12,000 characters, keeping the start and the end) and the earlier turns of the chat. Each case is judged five times and passes only if all five pass. A split verdict is labeled, for example <code>[judge split: 3 of 5 runs passed]</code>, and left for a person to read.</p>
   <p class="small">The judge is dependable when the tester's note is specific. With a vague note it wobbles, and setting the temperature to 0 only hides the wobble. On held-out cases it is pessimistic, because it compares against fixes that may be years old.</p>
 </section>
 
@@ -1154,10 +1114,10 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
   <h2 id="h-edges">Rough edges and what's next</h2>
   <ul class="edges">
     <li><b>Near-duplicate chunks, fixed October 7.</b> When a few short lines came right before one very long line, such as the pasted log in #703, the overlap step-back emitted shrinking copies of those short lines. The chunker now leaves room for the long line instead. Rebuilt from the same documents, the index sheds 174 chunks from 37 threads, #703 goes from 18 chunks to 8, and the retrieval eval is unchanged. Chunks whose text appears elsewhere in their thread fell from 243 to 69; the rest are real repeats, such as a script pasted twice.</li>
-    <li><b>One thread can fill the top 8.</b> Long threads make many chunks, and nothing stops all of them from ranking at once. In the exact-error search in §4, all eight slots were #703; after the chunker fix it is six of eight. Grouping results by thread is the likely fix.</li>
+    <li><b>One thread filling the top 8, fixed October 7.</b> Long threads make many chunks, and in the exact-error search in §4 all eight slots were #703. The agent's search now lists each thread or docs page once, by its best chunk, and fills the freed slots from further down. In the agent's own searches, that raised the average from 5 different sources in 8 to 8.</li>
     <li><b>Docs only at the latest release.</b> Code is version-pinned, docs aren't. A question about 1.0.1 still sees the 26.0.0 docs, as step 1 of the recorded run shows.</li>
     <li><b>No test with reworded questions yet.</b> The retrieval test only checks whether a thread's own opening post finds it (§11). Correct URLs from testers fill that gap.</li>
-    <li><b>The router's confidence check is coarse.</b> “Found by both lists” only means each top-40 list contains the top hit. In the b=10 search, a thread ranked 23rd and 28th was enough to send the question one-shot.</li>
+    <li><b>Every answer takes tens of seconds.</b> The median test question took 24 seconds, against 2 for the old one-shot path. The progress panel shows each step while the agent works; streaming the answer, or a faster model for plain questions, would close some of the gap.</li>
     <li><b>Planned, in ROADMAP.md:</b> an A/B test against open-weight models, an embed in the apps' Read the Docs pages, a custom domain, and a per-person rate limit before anything goes public.</li>
   </ul>
 </section>
@@ -1167,7 +1127,7 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
   <p class="eyebrow">§13 · Your turn</p>
   <h2 id="h-help">How to test it well</h2>
   <ul class="tips">
-    <li><span><b>One question per chat.</b> Start a new chat for a new topic. Follow-ups are welcome; they go to the agent.</span></li>
+    <li><span><b>One question per chat.</b> Start a new chat for a new topic. Follow-ups are welcome; the agent sees the chat.</span></li>
     <li><span><b>Rate every answer, good ones too.</b> Pick 👍 or 👎 first; the panel won't log without one.</span></li>
     <li><span><b>Paste the correct source URL when you know it.</b> It is the one field that turns your case into an automatic retrieval test.</span></li>
     <li><span><b>Write a specific note.</b> “It invented --foo; the flag is --bar” can be checked. “Not great” can't.</span></li>
@@ -1179,6 +1139,7 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
   <footer class="foot">
     <p>Built from <a href="https://github.com/PennLINC/linc-bids-llm">PennLINC/linc-bids-llm</a> at main, commit e31f2c3 (October 5, 2026). Counts, chunks and search results come from the index built 2026-10-05 16:04 UTC, and the retrieval eval was re-run against it the same day.</p>
     <p>Updated October 7, 2026, with the chunker fix: the overlap row in §2, the note on the third search in §4, and the first two items in §12. Every other number still describes the October 5 index.</p>
+    <p>Updated again on October 7, when the one-shot path was removed and the agent got <code>read_thread</code> and grouped search results: §0, §4 and §6 to §13. The measurements in §6 and §9 and the retrieval numbers in §11 come from the 2026-10-07 index.</p>
   </footer>
 </section>
 </main>
@@ -1322,7 +1283,7 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
       $("#fx-b").innerHTML = d.b.map(function (r, k) { return row(r, k + 1, false); }).join("");
       $("#fx-f").innerHTML = d.f.map(function (r, k) { return row(r, k + 1, true); }).join("");
       var p = d.route || [];
-      $("#fx-route").innerHTML = "Router decision for this question:<span class=\"path-pill\">" + esc(ROUTE[p[0]] || p[0] || "?") + "</span>“" + esc(p[1] || "") + "”";
+      $("#fx-route").innerHTML = "Until October 2026 the router sent this question<span class=\"path-pill\">" + esc(ROUTE[p[0]] || p[0] || "?") + "</span>“" + esc(p[1] || "") + "”. Every question now goes to the agent (§6).";
     }
     var panel = $("#fx-panel");
     function clear() { $$("#fx-panel li").forEach(function (li) { li.classList.remove("hl", "same"); }); }

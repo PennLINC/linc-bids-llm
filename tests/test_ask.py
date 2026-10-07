@@ -30,7 +30,11 @@ def test_load_manifest_match_ok(config):
 
 
 def test_parse_args():
-    assert _parse_args(["how", "do", "I", "run"]) == ("how do I run", None, None)
-    assert _parse_args(["--agent", "a", "traceback"]) == ("a traceback", None, "agent")
-    assert _parse_args(["--oneshot", "q"]) == ("q", None, "oneshot")
-    assert _parse_args(["--app", "qsiprep", "why", "fail"]) == ("why fail", "qsiprep", None)
+    assert _parse_args(["how", "do", "I", "run"]) == ("how do I run", None)
+    assert _parse_args(["--app", "qsiprep", "why", "fail"]) == ("why fail", "qsiprep")
+    # the retired path switches are dropped, not read as part of the question
+    assert _parse_args(["--agent", "a", "traceback"]) == ("a traceback", None)
+    assert _parse_args(["--oneshot", "q"]) == ("q", None)
+    # flags of the app being asked about stay in the question
+    assert _parse_args(["what", "is", "--output-resolution"]) == (
+        "what is --output-resolution", None)

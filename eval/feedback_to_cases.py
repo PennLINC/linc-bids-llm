@@ -19,7 +19,7 @@ import json
 from pathlib import Path
 
 from eval.feedback_report import add_source_args, collect
-from eval.urls import canon_url
+from src.urls import canon_url
 
 REGRESSION = Path("eval/regression.json")
 

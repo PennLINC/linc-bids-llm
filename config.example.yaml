@@ -120,8 +120,8 @@ chunk:
   overlap_tokens: 75
 
 llm:
-  oneshot_model: gpt-5.4-mini      # FAQ-shaped path
-  agent_model: gpt-5.6-terra       # tool loop over tracebacks justifies mid-tier
+  agent_model: gpt-5.6-terra       # answers every question (tool loop)
+  judge_model: gpt-5.4-mini        # the eval's answer judge (run_eval --answers)
   max_output_tokens: 2500
   max_tool_iterations: 12
   # Hard in-app daily spend ceiling (UTC), the ONLY hard cost backstop — no

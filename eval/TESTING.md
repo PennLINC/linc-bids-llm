@@ -17,13 +17,13 @@ answer to — that's what makes your rating trustworthy):
 
 | # | Archetype | What it exercises |
 |---|-----------|-------------------|
-| 1 | Plain FAQ ("how do I set X?") | one-shot path, docs/thread citation |
-| 2 | Pasted traceback | agent path, grep → raising code → permalink |
+| 1 | Plain FAQ ("how do I set X?") | answer from a thread or docs page the agent read, with a citation |
+| 2 | Pasted traceback | grep → raising code → permalink |
 | 3 | Version-specific ("on 1.1.1, …") | version resolution, tag-pinned permalinks |
 | 4 | Cross-version regression ("worked in X, broke in Y") | version awareness, "fixed in vZ" |
 | 5 | Error string you know is in a closed issue | retrieval surfaces the known thread |
 | 6 | Genuinely unanswerable / novel | refuse-to-guess, escalation to issue draft |
-| 7 | A follow-up in the same chat | agent path (Auto sends every follow-up there), multi-turn context |
+| 7 | A follow-up in the same chat | multi-turn context: the version and error given earlier still count |
 
 ## Rating rubric — judge each answer on
 

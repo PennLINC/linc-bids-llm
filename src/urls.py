@@ -1,5 +1,5 @@
-"""Canonical keys for source URLs, so a URL a tester pastes can be matched to
-the one the index stores.
+"""Canonical keys for source URLs, so a URL a tester pastes (or the agent
+passes to read_thread) can be matched to the one the index stores.
 
 The index holds exactly one form per source: GitHub's `html_url`, a NeuroStars
 `/t/<slug>/<id>`, a tag-pinned `blob/<tag>/<path>?plain=1#L..` docs permalink.

@@ -3,10 +3,11 @@ import json
 from types import SimpleNamespace
 
 from eval.run_eval import (ANSWER_CHARS, JUDGE_RUNS, JUDGE_SYS, JUDGE_SYS_FEEDBACK,
-                           _clip, _reciprocal_rank, _urls, explain_miss,
-                           judge_answer, judge_messages, retrieval_scores)
+                           _clip, _first_docs, _reciprocal_rank, _urls,
+                           explain_miss, judge_answer, judge_messages,
+                           judge_model, retrieval_scores)
 from eval.harvest_eval import _stratified_sample
-from eval.urls import canon_url
+from src.urls import canon_url
 
 
 def test_reciprocal_rank():
@@ -41,8 +42,8 @@ class FakeStore:
     def __init__(self, ranking):
         self.ranking = ranking
 
-    def hybrid_query(self, query, k, where=None):
-        return self.ranking[:k]
+    def hybrid_query(self, query, k, where=None, per_doc=None):
+        return _first_docs(self.ranking, k) if per_doc else self.ranking[:k]
 
     def _vector_ids(self, q, k, where=None):
         return [r["id"] for r in self.ranking[:k]]
@@ -111,15 +112,39 @@ def test_retrieval_scores_scope_like_the_app():
     seen = []
 
     class ScopeStore(FakeStore):
-        def hybrid_query(self, query, k, where=None):
-            seen.append(where)
-            return super().hybrid_query(query, k, where)
+        def hybrid_query(self, query, k, where=None, per_doc=None):
+            seen.append((where, per_doc))
+            return super().hybrid_query(query, k, where, per_doc)
 
     config = {"apps": {"qsiprep": {"neighbors": ["qsirecon"]}}}
     cases = [{"app": "qsiprep", "source": "feedback", "query": "q", "gold_url": "u"}]
     retrieval_scores(ScopeStore([]), cases, k=8, config=config)
     retrieval_scores(ScopeStore([]), cases, k=8)
-    assert seen == [{"app": ["qsiprep", "qsirecon"]}, {"app": "qsiprep"}]
+    # scoped like the app, and one result per document like search_kb
+    assert seen == [({"app": ["qsiprep", "qsirecon"]}, 1), ({"app": "qsiprep"}, 1)]
+
+
+def test_retrieval_scores_count_documents_not_chunks():
+    # three chunks of one thread outrank the gold; the agent sees them as one
+    # result, so the gold is 2nd, not 4th, and makes a top 2
+    ranking = [{"id": f"a{i}", "url": "u-long#L%d" % i} for i in range(3)]
+    ranking.append({"id": "g", "url": "u-gold"})
+    cases = [{"app": "qsiprep", "source": "issues", "query": "q", "gold_url": "u-gold"}]
+    r = retrieval_scores(FakeStore(ranking), cases, k=2)
+    for method in ("hybrid", "vector", "bm25"):
+        assert r["overall"][method] == {"hit_rate": 1.0, "mrr": 0.5}
+
+
+def test_first_docs_keeps_the_best_chunk_of_each_document():
+    recs = [{"id": "1", "url": "a#L1-L5"}, {"id": "2", "url": "a#L9-L20"},
+            {"id": "3", "url": "b"}, {"id": "4", "url": "c"}]
+    assert [r["id"] for r in _first_docs(recs, 2)] == ["1", "3"]
+    assert [r["id"] for r in _first_docs(recs, 8)] == ["1", "3", "4"]
+
+
+def test_judge_model_reads_older_configs():
+    assert judge_model({"llm": {"judge_model": "j", "oneshot_model": "m"}}) == "j"
+    assert judge_model({"llm": {"oneshot_model": "m"}}) == "m"    # pre-removal config
 
 
 def test_explain_miss_separates_corpus_gaps_from_ranking():
@@ -145,41 +170,41 @@ def test_judge_frames_feedback_notes_differently_from_resolutions():
         assert part in user["content"]
 
 
-def test_answer_scores_routes_a_followup_case_with_its_history(monkeypatch):
-    """A replayed follow-up must reach route() with the chat it was asked in,
-    so it takes the same (agent) path it took in the app. No LLM is called."""
+def test_answer_scores_replays_a_followup_with_its_history(monkeypatch):
+    """A replayed follow-up must reach the agent with the chat it was asked
+    in. A case a tester rated on the old one-shot path says so. No LLM is
+    called."""
     import eval.run_eval as run_eval
-    from src.router import Decision
 
-    seen = {}
-
-    def fake_route(question, store, config, app, history=None):
-        seen["history"] = history
-        return Decision("agent", [], "follow-up turn; needs chat context")
+    seen = []
 
     class Result:
         answer = "agent answer"
 
-    monkeypatch.setattr(run_eval.router_mod, "route", fake_route)
+    def fake_agent(question, app, config, store, history=None, client=None):
+        seen.append(history)
+        return Result()
+
     monkeypatch.setattr(run_eval.answer_mod, "_client", lambda: object())
-    monkeypatch.setattr(run_eval.answer_mod, "answer_agent",
-                        lambda *a, **kw: Result())
-    monkeypatch.setattr(run_eval.answer_mod, "answer_oneshot",
-                        lambda *a, **kw: (_ for _ in ()).throw(
-                            AssertionError("one-shot path must not run")))
+    monkeypatch.setattr(run_eval.answer_mod, "answer_agent", fake_agent)
     monkeypatch.setattr(run_eval, "judge_answer",
                         lambda case, cand, config, client:
                             {"verdict": "pass", "reason": "ok"})
 
     history = [{"role": "user", "content": "how do I set the resolution?"},
                {"role": "assistant", "content": "Use --output-resolution."}]
-    case = {"source": "feedback", "case_id": 1, "app": "qsiprep",
-            "query": "why?", "reference": "because ...", "history": history}
-    out = run_eval.answer_scores(store=None, cases=[case], config={}, sample=1)
+    followup = {"source": "feedback", "case_id": 1, "app": "qsiprep",
+                "query": "why?", "reference": "because ...", "history": history,
+                "rated_path": "agent"}
+    oneshot = {"source": "feedback", "case_id": 2, "app": "qsiprep",
+               "query": "what is eddy?", "reference": "...", "rated_path": "oneshot"}
+    out = run_eval.answer_scores(store=None, cases=[followup, oneshot], config={},
+                                 sample=2)
 
-    assert seen["history"] == history
-    assert out["by_path"] == {"agent": {"n": 1, "pass_rate": 1.0}}
-    assert out["details"][0]["path"] == "agent"
+    assert sorted(seen, key=bool) == [None, history]
+    assert out["n"] == 2 and out["pass_rate"] == 1.0
+    rated = {d["case"]: d["rated"] for d in out["details"]}
+    assert rated == {"feedback#1": "", "feedback#2": "rated on oneshot"}
 
 
 def test_judge_reads_the_end_of_a_long_answer_and_the_earlier_chat():

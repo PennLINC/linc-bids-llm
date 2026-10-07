@@ -1,40 +1,9 @@
-"""Answer-path tests with a scripted fake OpenAI client — no network, no key."""
+"""Agent tests with a scripted fake OpenAI client — no network, no key."""
 from src import answer
+from src.tools import Toolbox
 
 
-# --- fakes mirroring the openai chat.completions response shape --------------
-
-class FakeFn:
-    def __init__(self, name, arguments):
-        self.name, self.arguments = name, arguments
-
-
-class FakeToolCall:
-    def __init__(self, id, name, arguments):
-        self.id, self.function = id, FakeFn(name, arguments)
-
-
-class FakeMsg:
-    def __init__(self, content=None, tool_calls=None):
-        self.content, self.tool_calls = content, tool_calls
-
-
-class FakeCompletions:
-    def __init__(self, script):
-        self.script, self.calls = list(script), []
-
-    def create(self, **kwargs):
-        self.calls.append(kwargs)
-        msg = self.script.pop(0)
-        return type("R", (), {"choices": [type("C", (), {"message": msg})]})
-
-
-class FakeClient:
-    def __init__(self, script):
-        self.chat = type("Chat", (), {"completions": FakeCompletions(script)})()
-
-
-# --- fakes for the Responses API (agent path) -------------------------------
+# --- fakes for the Responses API ----------------------------------------------
 
 class FakeFnCall:
     type = "function_call"
@@ -63,32 +32,10 @@ class FakeRespClient:
 
 
 class FakeStore:
-    def hybrid_query(self, query, k, where=None):
+    def hybrid_query(self, query, k, where=None, per_doc=None):
         return [{"id": "x", "title": "cnr_maps error", "source": "issues",
                  "url": "https://github.com/PennLINC/qsiprep/issues/42",
                  "gh_solved": True, "text": "add cnr_maps: true to the eddy config"}]
-
-
-CHUNKS = [
-    {"title": "Eddy config", "source": "docs", "url": "u1", "text": "set cnr_maps"},
-    {"title": "OOM thread", "source": "neurostars", "ns_solved": True,
-     "url": "u2", "text": "increase memory"},
-]
-
-
-# --- one-shot ----------------------------------------------------------------
-
-def test_answer_oneshot_builds_prompt_and_returns(config):
-    client = FakeClient([FakeMsg(content="Set cnr_maps: true [1].")])
-    out = answer.answer_oneshot("how to fix eddy config?", CHUNKS, "qsiprep",
-                                config, client=client)
-    assert out == "Set cnr_maps: true [1]."
-    sent = client.chat.completions.calls[0]
-    assert sent["model"] == config["llm"]["oneshot_model"]
-    user = sent["messages"][1]["content"]
-    assert "[1] Eddy config" in user and "[2] OOM thread" in user
-    assert "set cnr_maps" in user                       # chunk text included
-    assert "tools" not in sent                          # one-shot never offers tools
 
 
 def test_version_hint():
@@ -163,10 +110,10 @@ def test_version_hint_caps_candidates_and_prefers_releases():
 
 def test_notes_injected_into_system_prompt(config):
     # config fixture gives qsiprep a note about reconstruction being qsirecon's
-    client = FakeClient([FakeMsg(content="ok")])
-    answer.answer_oneshot("can qsiprep do reconstruction?", CHUNKS, "qsiprep",
-                          config, client=client)
-    system = client.chat.completions.calls[0]["messages"][0]["content"]
+    client = FakeRespClient([FakeResp(output_text="ok")])
+    answer.answer_agent("can qsiprep do reconstruction?", "qsiprep", config,
+                        FakeStore(), client=client)
+    system = client.responses.calls[0]["instructions"]
     assert "reconstruction is qsirecon's job" in system
     assert "(qsiprep)" in system            # note is attributed to its app
 
@@ -228,6 +175,33 @@ def test_answer_agent_hint_reads_the_chat(config):
     assert turn["role"] == "user" and turn["content"].startswith(FOLLOWUP)
     assert "Earlier in this chat the user mentioned '1.0.0rc2'" in turn["content"]
     assert "did not state a version" not in turn["content"]
+
+
+def test_answer_agent_offers_read_thread_and_says_when_to_use_it(config):
+    client = FakeRespClient([FakeResp(output_text="ok")])
+    answer.answer_agent("q", "qsiprep", config, FakeStore(), client=client)
+    sent = client.responses.calls[0]
+    assert {t["name"] for t in sent["tools"]} == {
+        "search_kb", "read_thread", "grep_code", "read_file"}
+    assert "read_thread it before you rely on it" in sent["instructions"]
+
+
+def test_answer_agent_reports_each_step_as_it_starts(config, monkeypatch):
+    ran = []
+    monkeypatch.setattr(Toolbox, "call",
+                        lambda self, name, args: ran.append(name) or "result")
+    script = [
+        FakeResp(output=[FakeFnCall("search_kb", '{"query": "cnr_maps"}', "c1"),
+                         FakeFnCall("read_thread", '{"url": "u"}', "c2")]),
+        FakeResp(output_text="done"),
+    ]
+    seen = []
+    answer.answer_agent("q", "qsiprep", config, FakeStore(),
+                        client=FakeRespClient(script),
+                        on_step=lambda tool, args: seen.append((tool, args, list(ran))))
+    # each step is reported with its parsed arguments, before that tool runs
+    assert seen == [("search_kb", {"query": "cnr_maps"}, []),
+                    ("read_thread", {"url": "u"}, ["search_kb"])]
 
 
 def test_answer_agent_tolerates_bad_tool_json(config):

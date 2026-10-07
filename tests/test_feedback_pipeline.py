@@ -65,13 +65,14 @@ def test_run_context_records_model_per_path():
     cfg = {"llm": {"oneshot_model": "m-small", "agent_model": "m-big",
                    "api_base": "http://localhost:11434/v1"},
            "retrieval": {"embed_model": "bge"}}
-    one = run_context(cfg, "oneshot")
+    one = run_context(cfg, "oneshot")      # rated from a chat saved before removal
     agent = run_context(cfg, "agent")
     assert one["model"] == "m-small" and agent["model"] == "m-big"
-    # both models always recorded, so a rating stays interpretable later
-    assert one["oneshot_model"] == "m-small" and one["agent_model"] == "m-big"
-    assert one["embed_model"] == "bge"
-    assert one["api_base"] == "http://localhost:11434/v1"
+    assert one["agent_model"] == "m-big"
+    assert agent["embed_model"] == "bge"
+    assert agent["api_base"] == "http://localhost:11434/v1"
+    # a config written after the removal names no one-shot model
+    assert run_context({"llm": {"agent_model": "m-big"}}, "oneshot")["model"] is None
 
 
 def test_entries_to_cases_filters_and_shapes():
@@ -180,7 +181,7 @@ def test_regression_cases_are_run_eval_compatible():
     cases = entries_to_cases(ENTRIES)
 
     class FakeStore:
-        def hybrid_query(self, q, k, where=None):
+        def hybrid_query(self, q, k, where=None, per_doc=None):
             return [{"url": "https://gh/issues/42"}]
         def _vector_ids(self, q, k, where=None): return ["a"]
         def _bm25_ids(self, q, k, where=None): return ["a"]
