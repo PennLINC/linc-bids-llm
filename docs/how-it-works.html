@@ -650,7 +650,7 @@ Here is the full output from the error (sorry for the formatting):
     <thead><tr><th>Setting</th><th>What it does</th></tr></thead>
     <tbody>
       <tr><td class="nowrap">Window</td><td>About 500 tokens, counted with OpenAI's <code>cl100k</code> tokenizer. A single line longer than that becomes its own oversized chunk.</td></tr>
-      <tr><td class="nowrap">Overlap</td><td>About 75 tokens of whole lines repeat at the start of the next window, so a fact that straddles a boundary appears whole in at least one chunk.</td></tr>
+      <tr><td class="nowrap">Overlap</td><td>About 75 tokens of whole lines repeat at the start of the next window, so a fact that straddles a boundary appears whole in at least one chunk. Before a long line the overlap shrinks to make room for it, so every chunk reaches past the one before.</td></tr>
       <tr><td class="nowrap">Headings</td><td>A markdown heading (<code>#</code> to <code>######</code>) starts a new section, and windows never cross one. reStructuredText titles are underlined instead, so <code>.rst</code> files like this one are cut by size alone.</td></tr>
       <tr><td class="nowrap">Docs links</td><td><code>blob/&lt;tag&gt;/&lt;path&gt;?plain=1#L&lt;start&gt;-L&lt;end&gt;</code>. The <code>?plain=1</code> forces GitHub's code view; its rendered view ignores line anchors.</td></tr>
       <tr><td class="nowrap">Thread chunks</td><td>Keep the thread's URL. Every chunk after the first gets <code># &lt;title&gt;</code> put in front, so a lone comment still says what it is about.</td></tr>
@@ -1153,8 +1153,8 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
   <p class="eyebrow">§12 · Status</p>
   <h2 id="h-edges">Rough edges and what's next</h2>
   <ul class="edges">
-    <li><b>Near-duplicate chunks.</b> 243 chunks (2%), spread over 65 threads, repeat lines from a neighboring chunk. When a few short lines come right before one very long line, such as the pasted log in #703, the overlap step-back emits shrinking copies of those short lines. #703 has 18 chunks partly for this reason.</li>
-    <li><b>One thread can fill the top 8.</b> Long threads make many chunks, and nothing stops all of them from ranking at once. In the exact-error search in §4, all eight slots are #703. Grouping results by thread is the likely fix.</li>
+    <li><b>Near-duplicate chunks, fixed October 7.</b> When a few short lines came right before one very long line, such as the pasted log in #703, the overlap step-back emitted shrinking copies of those short lines. The chunker now leaves room for the long line instead. Rebuilt from the same documents, the index sheds 174 chunks from 37 threads, #703 goes from 18 chunks to 8, and the retrieval eval is unchanged. Chunks whose text appears elsewhere in their thread fell from 243 to 69; the rest are real repeats, such as a script pasted twice.</li>
+    <li><b>One thread can fill the top 8.</b> Long threads make many chunks, and nothing stops all of them from ranking at once. In the exact-error search in §4, all eight slots were #703; after the chunker fix it is six of eight. Grouping results by thread is the likely fix.</li>
     <li><b>Docs only at the latest release.</b> Code is version-pinned, docs aren't. A question about 1.0.1 still sees the 26.0.0 docs, as step 1 of the recorded run shows.</li>
     <li><b>No test with reworded questions yet.</b> The retrieval test only checks whether a thread's own opening post finds it (§11). Correct URLs from testers fill that gap.</li>
     <li><b>The router's confidence check is coarse.</b> “Found by both lists” only means each top-40 list contains the top hit. In the b=10 search, a thread ranked 23rd and 28th was enough to send the question one-shot.</li>
@@ -1178,6 +1178,7 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
 
   <footer class="foot">
     <p>Built from <a href="https://github.com/PennLINC/linc-bids-llm">PennLINC/linc-bids-llm</a> at main, commit e31f2c3 (October 5, 2026). Counts, chunks and search results come from the index built 2026-10-05 16:04 UTC, and the retrieval eval was re-run against it the same day.</p>
+    <p>Updated October 7, 2026, with the chunker fix: the overlap row in §2, the note on the third search in §4, and the first two items in §12. Every other number still describes the October 5 index.</p>
   </footer>
 </section>
 </main>
@@ -1279,7 +1280,7 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
     var NOTE = [
       "The vector side leads with an older “Unable to use GPU for eddy” issue. The keyword side leads with a TOPUP thread. Fusion puts #725 first, “[ENH] add --prefer-gpu”, which the two sides ranked 3rd and 7th. Neither side had it on top, but both found it.",
       "The question shares few distinctive words with the issue that answers it (#703 says “the lowest bvals are 10”, and one-character tokens like b and 0 are dropped). The vector side ranks #703 first; the keyword side doesn't have it in its top 40 at all. After fusion #703 is 2nd, behind a thread both sides ranked in the 20s. RRF rewards agreement even when the agreement is weak.",
-      "An exact error string is where keywords shine, and here both sides agree on #703. But all eight fused slots are chunks of that one thread. Long threads make many chunks, and a chunking quirk adds near-copies (§12)."
+      "An exact error string is where keywords shine, and here both sides agree on #703. But all eight fused slots are chunks of that one thread. Long threads make many chunks, and in this index a chunking bug also added near-copies of some of them (fixed since; see §12)."
     ];
     var ROUTE = { oneshot: "one-shot", agent: "agent" };
     function ref(url, src) {

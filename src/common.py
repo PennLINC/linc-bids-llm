@@ -29,6 +29,13 @@ BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 
 HEADING_RE = re.compile(r"^#{1,6}\s")
 
+# Bump when chunk_text cuts the same text differently. The ingest manifest
+# records it, and an index built by an older chunker gets a full rebuild:
+# incremental syncs only re-chunk what changed, so most threads would keep
+# their old chunks forever.
+#   2: no more shrinking copies of a window's tail before a long line
+CHUNKER_VERSION = 2
+
 
 def load_dotenv(path: Path | None = None) -> None:
     """Load KEY=VALUE lines from .env into os.environ (existing vars win)."""
@@ -99,7 +106,9 @@ def chunk_text(text: str, size_tokens: int, overlap_tokens: int) -> list[tuple[s
 
     Splits at markdown headings first, then packs lines into token windows,
     so line ranges are exact per chunk (1-indexed, inclusive). A single line
-    longer than size_tokens becomes its own oversized chunk.
+    longer than size_tokens becomes its own oversized chunk. Each chunk starts
+    and ends past the one before it, so none repeats lines that are all in its
+    neighbor.
     Returns [(chunk, line_start, line_end), ...].
     """
     lines = text.splitlines()
@@ -130,13 +139,25 @@ def chunk_text(text: str, size_tokens: int, overlap_tokens: int) -> list[tuple[s
             while k1 > k0 and not sec_lines[k1 - 1].strip():
                 k1 -= 1
             chunk = "\n".join(sec_lines[k0:k1])
-            if chunk:
-                chunks.append((chunk, start + k0 + 1, start + k1))
+            first, last = start + k0 + 1, start + k1
+            # Skip a window whose lines all sit inside the previous chunk (the
+            # trimmed tail of a window that only gained blank lines).
+            if chunk and not (chunks and chunks[-1][1] <= first
+                              and last <= chunks[-1][2]):
+                chunks.append((chunk, first, last))
             if j >= len(sec_lines):
                 break
-            # Step back over ~overlap_tokens worth of lines for the next window.
+            # Step back over ~overlap_tokens worth of lines for the next window,
+            # but only as far as still leaves room for line j: the next window
+            # has to get past it. Stepping back further, when line j was too
+            # long to share a window with the overlap, re-emitted ever-shorter
+            # copies of this window's tail before line j got a chunk of its own.
+            # Never step back to this window's first line of text either, or
+            # the next chunk would start on the same line as this one.
             back, overlap = j, 0
-            while back > i + 1 and overlap + line_tokens[back - 1] <= overlap_tokens:
+            while (back > k0 + 1
+                   and overlap + line_tokens[back - 1] <= overlap_tokens
+                   and overlap + line_tokens[back - 1] + line_tokens[j] <= size_tokens):
                 back -= 1
                 overlap += line_tokens[back]
             i = back

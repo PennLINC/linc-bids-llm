@@ -1,3 +1,5 @@
+import random
+
 import pytest
 
 from src import common
@@ -49,6 +51,56 @@ def test_chunk_edge_cases():
     # a single line longer than the budget still becomes one (oversized) chunk
     out = common.chunk_text("x " * 2000, 100, 10)
     assert len(out) == 1
+
+
+def test_chunk_no_shrinking_copies_before_an_oversized_line():
+    # Short lines, then one line too long for any window (a log pasted on a
+    # single line, as in qsiprep#703). The window that stops short of it used
+    # to be followed by ever-shorter copies of its own tail, one per line,
+    # before the long line got a chunk of its own.
+    text = "\n".join([f"short line {i}" for i in range(6)] + ["log " * 400])
+    spans = [(s, e) for _, s, e in common.chunk_text(text, 60, 20)]
+    assert spans == [(1, 6), (7, 7)]
+
+
+def test_chunk_overlap_shrinks_to_fit_a_long_line():
+    # A line that fits a window on its own but not after the full overlap:
+    # keep as much overlap as still fits with it, and move past it.
+    long = " ".join(["word"] * 50)
+    size, overlap = 60, 20
+    assert size - overlap < common.count_tokens(long + "\n") <= size
+    text = "\n".join([f"short line {i}" for i in range(6)] + [long])
+    spans = [(s, e) for _, s, e in common.chunk_text(text, size, overlap)]
+    assert spans[0] == (1, 6)
+    assert spans[-1][1] == 7 and spans[-1][0] < 7   # the long line, with overlap
+    assert len(spans) == 2
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_chunk_windows_always_advance(seed):
+    # Random mixes of short lines, long lines, blank lines and headings. Each
+    # chunk must start and end past the one before it, so none repeats lines
+    # that are all in its neighbor; every non-blank line must still land in
+    # a chunk, with its exact text.
+    rng = random.Random(seed)
+    lines = []
+    for _ in range(rng.randint(5, 80)):
+        roll = rng.random()
+        if roll < 0.08:
+            lines.append(f"## heading {len(lines)}")
+        elif roll < 0.25:
+            lines.append("")
+        elif roll < 0.4:
+            lines.append("x " * rng.randint(15, 90))   # may not fit any window
+        else:
+            lines.append(" ".join(["w"] * rng.randint(1, 10)))
+    chunks = common.chunk_text("\n".join(lines), 40, 15)
+    for (_, s1, e1), (_, s2, e2) in zip(chunks, chunks[1:]):
+        assert s2 > s1 and e2 > e1
+    for text, s, e in chunks:
+        assert text == "\n".join(lines[s - 1:e])
+    covered = {n for _, s, e in chunks for n in range(s, e + 1)}
+    assert all(n in covered for n, line in enumerate(lines, 1) if line.strip())
 
 
 def test_chunk_never_exceeds_budget_except_single_lines():
