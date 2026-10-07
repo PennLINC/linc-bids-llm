@@ -27,6 +27,9 @@ ROOT = Path(__file__).resolve().parent.parent
 # prefixed with this instruction. Use it at query time; never at ingest time.
 BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 
+# Known gap: this also matches comment lines inside fenced code blocks, which
+# splits pasted scripts into tiny chunks (ROADMAP.md §4, "Chunker: comment
+# lines inside code blocks count as headings").
 HEADING_RE = re.compile(r"^#{1,6}\s")
 
 # Bump when chunk_text cuts the same text differently. The ingest manifest

@@ -382,3 +382,22 @@ go-public decision is made; skip Tier 1.
   point-in-time fixes and is pessimistic; judge for "correct and actionable"
   instead, or lean on the feedback-derived regression set, which is
   maintainer-verified current truth.
+- **Chunker: comment lines inside code blocks count as headings.**
+  `HEADING_RE` in `src/common.py` treats every line that opens with `#` to
+  `######` and a space as a markdown heading, including comment lines inside
+  fenced code blocks: shell, Python and YAML comments in pasted scripts, and R
+  comments in ModelArray's `.Rmd` vignettes. Each one starts a new section and
+  chunk windows never cross a section, so a pasted script is cut into one small
+  chunk per comment, often mid-block (the opening fence lands in one chunk, the
+  closing one in the next). In the 2026-10-07 index roughly 530 chunks (4.5%)
+  in 355 documents begin on such a line, by a rough heuristic: the chunk opens
+  on a `#` line and its first fence closes a block it never opened. For
+  example, `vignettes/walkthrough.Rmd` splits at `# load the CSV file:`.
+  Fix sketch: track fence state (lines starting with three backticks or `~~~`)
+  while splitting into sections and split only at headings outside a fence,
+  then bump `CHUNKER_VERSION` to 3, which forces a full rebuild (build it on a
+  laptop: DEPLOY.md §7). Mind unclosed fences: posts are clipped at 6,000
+  characters (`MAX_POST_CHARS`), which can drop a closing fence and leave the
+  rest of a thread "inside" a code block, so close the fence when clipping or
+  reset the state at each post. Measure with the heuristic above (it should
+  fall to near zero) and `python -m eval.run_eval` (no regression).
