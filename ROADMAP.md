@@ -96,8 +96,9 @@ Lightsail browser SSH (over 443) is the way in.
 - A **long-lived process** — Streamlit is websocket-based, so this is not a
   Lambda/serverless fit.
 - **~10–20 GB disk**: index (63 MB) + checkouts (279 MB) + model cache and the
-  Python env (torch dominates ~2 GB — on x86 the default pip wheel is already
-  CPU-only, no special index needed).
+  Python env (torch dominates: ~0.7 GB installed as the CPU build, ~5.5 GB as
+  the CUDA build that is the default pip wheel on x86 Linux — DEPLOY.md has
+  the CPU-only install).
 - **CPU only.** Query-time embedding of a single question with bge-small is
   trivial; there is no GPU need unless self-hosting a model (see economics).
 - **~4 GB RAM** is comfortable.

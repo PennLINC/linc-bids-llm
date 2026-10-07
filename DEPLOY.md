@@ -55,6 +55,7 @@ curl -fsSL -o mf.sh https://github.com/conda-forge/miniforge/releases/latest/dow
 bash mf.sh -b -p "$HOME/miniforge3" && rm mf.sh
 "$HOME/miniforge3/bin/mamba" create -y -n linc-bids-llm python=3.12
 git clone https://github.com/PennLINC/linc-bids-llm && cd linc-bids-llm
+"$HOME/miniforge3/envs/linc-bids-llm/bin/pip" install --no-deps torch --index-url https://download.pytorch.org/whl/cpu   # CPU-only torch, see note
 "$HOME/miniforge3/envs/linc-bids-llm/bin/pip" install -r requirements.txt
 cp config.example.yaml config.yaml     # set contact_email; review daily_budget_usd
 printf 'OPENAI_API_KEY=sk-...\n' > .env && chmod 600 .env   # real key
@@ -62,8 +63,12 @@ scripts/fetch_index.sh                 # public repo -> curl, no gh needed
 "$HOME/miniforge3/envs/linc-bids-llm/bin/python" -m src.checkouts   # ~2 min
 ```
 
-> On x86 Ubuntu, the default `pip` torch wheel is already CPU-only — it just
-> needs ~2 GB of disk (the 60 GB SSD is fine). No special index URL required.
+> On x86 Linux the default `pip` torch wheel is the CUDA build: ~2.5 GB of
+> nvidia-*/triton downloads (~4 GB on disk) that this CPU-only box never uses.
+> The first `pip` line takes the CPU build from PyTorch's index instead
+> (`--no-deps`: its copies of other packages lag PyPI; the requirements install
+> then resolves torch's own dependencies from PyPI) — what CI does too. The
+> CUDA build also works, just bigger (the 60 GB SSD is fine).
 
 **Smoke-test the whole pipeline from the box** (no browser/port needed):
 
