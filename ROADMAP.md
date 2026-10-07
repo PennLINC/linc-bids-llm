@@ -8,7 +8,7 @@ cold. Nothing here blocks maintainer battle-testing.
 
 ## 1. Open-model support + A/B evaluation
 
-**Goal:** run the answer paths against open-weight models (hosted or local) and
+**Goal:** run the agent against open-weight models (hosted or local) and
 measure the quality/cost trade-off with the existing eval harness, rather than
 guessing from public benchmarks.
 
@@ -30,8 +30,8 @@ agent path's cost (see §2 economics).
      tool_protocol: responses  # "responses" (OpenAI reasoning models) | "chat" (everything else)
    ```
 2. **`src/answer.py::_client()`** — pass `base_url=config["llm"]["api_base"]`
-   and read the key from `api_key_env`. One-shot needs nothing else; it already
-   uses `chat.completions`, which every OpenAI-compatible server speaks.
+   and read the key from `api_key_env`. The eval's judge needs nothing else; it
+   already uses `chat.completions`, which every OpenAI-compatible server speaks.
 3. **`answer_agent`** — add a `chat.completions` tool-loop branch, selected when
    `tool_protocol: chat`. **This is the crux:** the agent path currently runs on
    the OpenAI **Responses API** because OpenAI rejects function tools combined
@@ -60,9 +60,11 @@ agent path's cost (see §2 economics).
 
 **Local-model caveat:** tool-call reliability is the binding constraint —
 sub-7B models and quantization below Q4_K_M emit malformed tool calls
-regardless of harness. And the agent path fires 5–13 model turns per question,
-so local latency compounds badly (minutes, not seconds). Local models are
-plausible for the **one-shot** path; the agent path wants a hosted/strong model.
+regardless of harness. And the agent fires 5–13 model turns per question,
+so local latency compounds badly (minutes, not seconds). The agent wants a
+hosted/strong model; a local model could at most take a single-call job such
+as the eval's judge. (The one-shot path, where local models looked plausible,
+was removed in October 2026.)
 
 ### Do *not* distribute local models to testers
 
@@ -277,35 +279,38 @@ is the control that actually maps to cost, because it counts questions/tokens.
 
 ### The open-model economics (the part worth internalizing)
 
-Measured against observed traffic, at the actual OpenAI rates (verified 2026-08:
-mini $0.75/$4.50, terra $2.00/$12.00 per 1M in/out, short-context): a one-shot
-answer costs **~$0.005**; an agent answer costs **~$0.12** (5 model turns, 13
-tool calls, ~35k cumulative input + ~4k output, reasoning billed as output) —
-less in practice, since prompt caching on the threaded context isn't credited
-here. At ~30 questions/day with 40% routed to the agent, that's **~$45/mo** in
-tokens.
+At the actual OpenAI rates (verified 2026-08: terra $2.00/$12.00 per 1M in/out,
+short-context), an agent answer costs a median **~3.6¢** with prompt caching
+credited, as OpenAI bills it (17 test questions on 2026-10-07: 1.2¢–8.2¢, 5
+model calls and 7 tool calls at the median), or ~6.6¢ counting all input at
+full price, as the app's daily meter does. Since October 2026 every question
+goes to the agent (the one-shot path cost ~0.4¢ but answered poorly), so ~30
+questions/day is **~$35–60/mo** in tokens.
 
 **Self-hosting an open model on an AWS GPU is not cost-effective at lab scale.**
 A `g6.xlarge` (L4, 24 GB — enough for a 27–32B Q4 model) runs roughly
 $0.80/hr ≈ **$590/mo** always-on. Break-even against OpenAI is on the order of
-**~4,000 agentic questions/month (~130/day)**. A lab tool will not approach
-that. The conclusion is robust even if these rates are off by ±30%.
+**~10,000 questions/month (~300/day)** at the measured 4–7¢ an answer. A lab
+tool will not approach that. The conclusion is robust even if these rates are
+off by ±30%.
 
 So the open-model avenue on AWS should be **hosted open-weight APIs**, not
 self-hosted GPUs:
 
 - GLM-5.2 / DeepSeek V4 Pro via OpenRouter/Fireworks/Together — roughly **4–5×
-  cheaper output** than the current agent model, taking tokens from ~$57 to
-  perhaps ~$20/mo at the same volume.
+  cheaper output** than the current agent model, taking tokens from ~$35–60 to
+  perhaps ~$10–20/mo at the same volume.
 - **AWS Bedrock** deserves a look *because* you're going AWS: it bills through
   your AWS account (often easier procurement than a card on OpenAI) and hosts
   open-weight families. Note Bedrock does **not** host OpenAI models, so this
   means changing provider — which is precisely what the §1 abstraction enables.
   Bedrock's tool-use API differs from both branches, so budget a third adapter.
 
-**Bigger lever than model choice:** the router already sends the FAQ-majority to
-one-shot at ~1/30th the cost of an agent answer. Tuning routing (and verifying
-quality with the eval) moves the bill more than swapping models does.
+**Levers on the bill now:** the agent's step count (a median of 5 model calls,
+each re-reading the context, mostly at the cached rate) and the model. The
+one-shot path was the bigger lever, at about a tenth of the cost of an agent
+answer, until it was removed in October 2026 for answering poorly (see
+docs/how-it-works.html §6).
 
 ### Suggested order
 

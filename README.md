@@ -22,6 +22,7 @@ sync, chat UI) is ported from the lab's internal linc-llm project.
 mamba create -n linc-bids-llm python=3.12
 mamba activate linc-bids-llm
 pip install -r requirements.txt      # requirements.txt mirrors this env exactly
+mamba install -c conda-forge ripgrep # rg, for the agent's grep_code (not on PyPI)
 cp config.example.yaml config.yaml   # set contact_email
 cp .env.example .env                 # set GITHUB_TOKEN (harvest), OPENAI_API_KEY
 ```
@@ -73,6 +74,7 @@ Re-running after a re-ingest overwrites the asset in place (`--clobber`).
 git clone https://github.com/PennLINC/linc-bids-llm && cd linc-bids-llm
 mamba create -n linc-bids-llm python=3.12 && mamba activate linc-bids-llm
 pip install -r requirements.txt
+mamba install -c conda-forge ripgrep           # rg, for the agent's grep_code
 cp config.example.yaml config.yaml            # set contact_email
 cp .env.example .env                          # set OPENAI_API_KEY (testers need only this)
 scripts/fetch_index.sh                        # download + unpack the prebuilt index/
@@ -81,8 +83,9 @@ streamlit run app.py
 ```
 
 First query downloads the embedding model (BAAI/bge-small-en-v1.5, ~130 MB);
-answers need each tester's own `OPENAI_API_KEY`. The one-shot path works without
-`checkouts/`; the agent path's `grep_code`/`read_file` need it.
+answers need each tester's own `OPENAI_API_KEY`, and the agent's
+`grep_code`/`read_file` need `checkouts/` (`grep_code` also needs `rg`:
+`mamba install -c conda-forge ripgrep`).
 
 **Battle-testing is methodical — follow [eval/TESTING.md](eval/TESTING.md):**
 work the scenario matrix, rate every answer (thumbs + problem category + the
@@ -106,12 +109,13 @@ so fixes are measurable and guarded against regression before wider release.
 - [x] Stage 3 — version-pinned checkouts + agent tools
       (`python -m src.checkouts` clones latest N tags + main;
       `src/tools.py` exposes search_kb / grep_code / read_file). Needs `rg`.
-- [x] Stage 4 — router + one-shot / agentic answer paths
-      (`python -m src.ask [--agent|--oneshot] "..."`). Needs OPENAI_API_KEY.
-      Agent loop runs on the Responses API (reasoning model + tools).
+- [x] Stage 4 — the agent (`python -m src.ask "..."`). Needs OPENAI_API_KEY.
+      Agent loop runs on the Responses API (reasoning model + tools). It began
+      beside a router and a one-shot path, removed in October 2026: every
+      question now goes to the agent (see docs/how-it-works.html, §6).
 - [x] Stage 5 — Streamlit chat UI (`streamlit run app.py`): multi-turn chat,
-      Auto/One-shot/Agent modes, routing + tool-call expanders, thumbs+comment
-      feedback to `.feedback/`, per-chat history in `.chats/`.
+      live tool-call progress + expanders, thumbs+comment feedback to
+      `.feedback/`, per-chat history in `.chats/`.
 - [x] Stage 6 — eval harness (`python -m eval.harvest_eval` builds the
       held-out set; `python -m eval.run_eval [--answers N]` scores it).
 
@@ -119,18 +123,20 @@ so fixes are measurable and guarded against regression before wider release.
 
 Known-item retrieval over 48 held-out solved cases (24 issues + 24 NeuroStars,
 stratified old/new): query with each case's opening post, check whether its gold
-thread lands in the hybrid top-k. Latest scorecard (k=8):
+thread lands in the hybrid top-k. Results count one entry per thread or docs
+file, as the agent's `search_kb` lists them. Latest scorecard (k=8, index of
+2026-10-07):
 
 | method | hit@8 | MRR |
 |--------|-------|-----|
-| hybrid | 100%  | 0.973 |
-| vector-only | 96% | 0.934 |
+| hybrid | 100%  | 0.974 |
+| vector-only | 98% | 0.937 |
 | bm25-only | 100% | 0.979 |
 
 The hit rates are high because the gold thread is itself indexed and the query
 is its own opening post — which also makes this set easy for BM25, since the
 query's exact tokens sit in the gold chunk. All three methods rank the gold
-thread ~1st. Hybrid's edge here is coverage, not rank: vector-only misses 8% of
+thread ~1st. Hybrid's edge here is coverage, not rank: vector-only misses 4% of
 issues (exact error strings) that BM25 catches, and fusion keeps them. (An
 earlier scorecard put vector/BM25 MRR near 0.4; that was a scoring bug — the
 single-method lists were scored in storage order rather than rank order — not a
@@ -140,8 +146,9 @@ changes.
 
 ### Answer eval (`--answers N`) — use with caution
 
-LLM-judged answers against the historical resolution, per path. A first run
-(n=8) scored agent 29% / one-shot 0%, but reading the judge's reasons, most
+The agent's answers, LLM-judged against the historical resolution. A first run
+(n=8, when the app still had a one-shot path) scored agent 29% / one-shot 0%,
+but reading the judge's reasons, most
 "fails" are the assistant giving a *correct, fuller* answer that doesn't match a
 **stale, point-in-time** historical fix (e.g. the reference says "use the
 `pennbbl/qsiprep:unstable` image", long gone; the assistant correctly points to
@@ -169,5 +176,6 @@ its history, verdicts wobble, usually as a split. About 2¢ per case on that run
 The qsiprep changelog is 88 of 146 docs chunks (60%). Measured, it is not noise
 in practice: in full retrieval it appears 0/8 for general questions (issue and
 thread chunks outrank it), and it correctly dominates only version/"what changed"
-questions — which serves the version-awareness goal. Kept. It only crowds
-`search_kb(source_filter="docs")`, a minor agent sub-path.
+questions — which serves the version-awareness goal. Kept. It used to crowd
+`search_kb(source_filter="docs")`; search results now list each file once, so
+it takes at most one slot there too.
