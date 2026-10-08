@@ -107,6 +107,25 @@ apps:
     checkout_tags: 5
     neighbors: []
 
+  # BABS runs other BIDS Apps at scale. Its corpus is its issues and docs: the
+  # `babs` NeuroStars tag has 2 topics, both mostly about the app BABS ran.
+  babs:
+    github_repo: PennLINC/babs
+    blurb: "Reproducible BIDS App runs on large datasets (DataLad, SLURM)."
+    docs_paths: [docs/]
+    neurostars_tags: [babs]
+    neurostars_search: []
+    checkout_tags: 5
+    neighbors: []                    # runs other apps; their corpora stay on their cards
+    notes:
+      - "BABS (BIDS App Bootstrap) does not process images itself: it runs a
+        containerized BIDS App (e.g. fMRIPrep, QSIPrep, XCP-D) over DataLad
+        datasets, one SLURM job per subject or session. Its own steps are
+        babs init, babs check-setup, babs submit, babs status and babs merge,
+        configured by a YAML file. When a job fails inside the BIDS App (that
+        app's own traceback in the job log), the cause is usually the app or
+        the arguments the YAML passes it, not BABS."
+
   # Add more the same way (config, not code) — e.g. freesurfer-post once it has
   # more of its own issue/doc signal. Probe each first (probes/) for tag health.
 

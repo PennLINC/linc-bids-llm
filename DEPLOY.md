@@ -168,6 +168,24 @@ systemd-analyze verify /etc/systemd/system/bids-assistant-refresh.{service,timer
 timer itself needs no restart (on a systemd older than 255.4-1ubuntu8.15, a
 restart would start a refresh at once).
 
+### Adding an app
+
+A new app is an entry under `apps:` in `config.example.yaml`. The server reads
+its own `config.yaml`, which a pull doesn't touch, so after deploying the
+change copy the entry over and run a refresh rather than wait for 03:30:
+
+```bash
+~/miniforge3/envs/linc-bids-llm/bin/python scripts/add_app_to_config.py babs
+sudo systemctl start --no-block bids-assistant-refresh.service
+journalctl -fu bids-assistant-refresh.service      # Ctrl-C after "done."
+```
+
+The script copies the entry as written, comments included, to the end of
+`apps:`, and writes `config.yaml` only if every other setting parses unchanged.
+The refresh clones the app's checkouts, harvests its docs, issues and NeuroStars
+threads whole (an incremental sync treats a new app as all new, so no full
+rebuild), then restarts the app, and the new card appears.
+
 ## 7. Refreshing the index + checkouts
 
 **Automatic (recommended) — the server self-refreshes nightly.** A `systemd`
