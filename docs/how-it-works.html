@@ -563,7 +563,7 @@ blockquote.q .who { display: block; font-family: var(--f-mono); font-size: .66re
     </table>
     </div>
     <div class="legend"><span><i style="background:var(--seg-docs)"></i>docs 807</span><span><i style="background:var(--seg-issues)"></i>issues 6,489</span><span><i style="background:var(--seg-ns)"></i>NeuroStars 4,705</span></div>
-    <figcaption>Chunks are the unit of search (§2). A few docs files make many chunks: QSIPrep's 15 docs files become 146 chunks. qsiplan and ModelArrayIO have no card of their own. They are searched as neighbors whenever someone asks about QSIPrep or ModelArray.</figcaption>
+    <figcaption>Chunks are the unit of search (§2). A few docs files make many chunks: QSIPrep's 15 docs files become 146 chunks. qsiplan and ModelArrayIO have no card of their own. They are searched as neighbors whenever someone asks about QSIPrep or ModelArray. BABS joined on October 8, after this snapshot: 29 docs files at release 0.5.4, 217 issues (156 closed as completed) and 2 NeuroStars threads, about 680 chunks.</figcaption>
   </figure>
 
   <h3>Which repos a question searches</h3>
@@ -575,6 +575,7 @@ blockquote.q .who { display: block; font-family: var(--f-mono); font-size: .66re
     <li><span>aslprep card</span><span>aslprep</span></li>
     <li><span>xcp_d card</span><span>xcp_d</span></li>
     <li><span>cubids card</span><span>cubids</span></li>
+    <li><span>babs card</span><span>babs</span></li>
   </ul>
 
   <h3>Turning a thread into one document</h3>
@@ -1140,6 +1141,7 @@ query     "dwiextract" OR "error" OR "no" OR "volumes" OR "present"</pre>
     <p>Built from <a href="https://github.com/PennLINC/linc-bids-llm">PennLINC/linc-bids-llm</a> at main, commit e31f2c3 (October 5, 2026). Counts, chunks and search results come from the index built 2026-10-05 16:04 UTC, and the retrieval eval was re-run against it the same day.</p>
     <p>Updated October 7, 2026, with the chunker fix: the overlap row in §2, the note on the third search in §4, and the first two items in §12. Every other number still describes the October 5 index.</p>
     <p>Updated again on October 7, when the one-shot path was removed and the agent got <code>read_thread</code> and grouped search results: §0, §4 and §6 to §13. The measurements in §6 and §9 and the retrieval numbers in §11 come from the 2026-10-07 index.</p>
+    <p>BABS was added on October 8: the note under the corpus table and the list of what each card searches, both in §1.</p>
   </footer>
 </section>
 </main>

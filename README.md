@@ -2,7 +2,8 @@
 
 [![CI](https://github.com/PennLINC/linc-bids-llm/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PennLINC/linc-bids-llm/actions/workflows/ci.yml)
 
-A troubleshooting assistant for the lab's BIDS Apps (v0: QSIPrep only). It
+A troubleshooting assistant for the lab's BIDS Apps (QSIPrep, QSIRecon,
+ASLPrep, XCP-D, ModelArray, CuBIDS and BABS). It
 answers questions and diagnoses errors the way a maintainer does: check whether
 someone already hit this (GitHub issues / NeuroStars), read the docs, and when
 necessary grep the actual code at the version the user ran — with links back to
