@@ -371,16 +371,19 @@ go-public decision is made; skip Tier 1.
 
 ## 4. Other deferred items
 
-- **More apps.** qsiprep, qsirecon, aslprep, xcp_d are live (4-app index).
-  Building qsirecon added the cross-app machinery once: list-valued `where`
-  scoping (`app ∈ {app, *neighbors}`) and a per-app `notes` field injected into
-  the system prompt to correct known confusions (e.g. reconstruction is
-  qsirecon's, not qsiprep's). With that in place, further apps (cubids,
-  freesurfer-post, modelarray) are **config-only** — add an `apps` entry,
-  `blurb`, `notes` if needed, re-ingest. Probe each first for tag health (e.g.
-  xcp_d's real NeuroStars signal is under `xcp_d`, not `xcp-d`). FreeSurfer
-  proper is out of scope (not lab-maintained); a lab wrapper like
-  freesurfer-post fits but currently has too little of its own issue/doc signal.
+- **More apps.** qsiprep (with qsiplan), qsirecon, aslprep, xcp_d, modelarray
+  (with modelarrayio), cubids and babs are live. Building qsirecon added the
+  cross-app machinery once: list-valued `where` scoping
+  (`app ∈ {app, *neighbors}`) and a per-app `notes` field injected into the
+  system prompt to correct known confusions (e.g. reconstruction is qsirecon's,
+  not qsiprep's). With that in place, a new app is **config-only**: add an
+  `apps` entry with a `blurb` and `notes` if needed, then on the server
+  `scripts/add_app_to_config.py <app>` and a refresh (DEPLOY.md, "Adding an
+  app"); an incremental sync takes a new app whole, no rebuild. Probe each
+  first for tag health (e.g. xcp_d's real NeuroStars signal is under `xcp_d`,
+  not `xcp-d`). FreeSurfer proper is out of scope (not lab-maintained); a lab
+  wrapper like freesurfer-post fits but currently has too little of its own
+  issue/doc signal.
 - **Issue-draft-to-GitHub** — v0 prints the draft; filing it and duplicate-
   checking open issues needs auth, so it rides with hosting.
 - **Answer-eval methodology** — the current LLM judge scores against stale
